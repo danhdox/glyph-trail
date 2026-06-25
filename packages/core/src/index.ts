@@ -268,6 +268,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
   private particles: Particle[] = [];
   private cols = 0;
   private rows = 0;
+  private cell = 0;
   private centroidX = 0;
   private centroidY = 0;
   private animationFrame = 0;
@@ -459,6 +460,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const rows = Math.max(1, Math.floor(height / cell));
     this.cols = cols;
     this.rows = rows;
+    this.cell = cell;
 
     const offsetX = Math.round((width - cols * cell) / 2);
     const offsetY = Math.round((height - rows * cell) / 2);
@@ -600,15 +602,16 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const reachSq = reach * reach;
     const trailStrength = clamp(settings.trail.strength / 100, 0, 1);
     const maxAge = mix(6, 34, clamp(settings.trail.tail / 100, 0, 1));
-    const splitBase = (10 + (settings.trail.chromatic / 100) * 18) * this.pixelRatio;
     const shimmerSpeed = 0.0012 + (settings.dither.speed / 100) * 0.003;
     const rounded = settings.glyph.preset === "organic";
     const dots = settings.glyph.preset === "dot-matrix";
     const glitchSetting = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
-    const flickerSeed = Math.floor(time / 45);
+    const cell = this.cell || 1;
+    // Flicker tick: the per-pixel jump targets re-roll a few times a second so pixels
+    // appear to flicker between their home and nearby cells. Faster speed = faster flicker.
+    const tick = Math.floor(time / mix(120, 45, clamp(settings.glitch.speed / 100, 0, 1)));
 
-    // Age the cursor trail and drop spent points. The glitch lives only along recent movement —
-    // the pixels are NOT pushed; the cursor just deposits a fading "static" charge as it sweeps.
+    // Age the cursor trail and drop spent points. The glitch lives only along recent movement.
     for (const point of this.pointerTrail) {
       point.age += 1;
     }
@@ -642,38 +645,31 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
             }
           }
         }
-        charge = clamp(charge * glitchSetting * (0.45 + trailStrength * 1.1), 0, 1);
+        charge = clamp(charge * glitchSetting * (0.5 + trailStrength), 0, 1);
       }
 
       let drawX = particle.homeX;
       let drawY = particle.homeY;
-      let split = 0;
-      let alpha = particle.baseAlpha * (0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16);
+      const alpha = clamp(particle.baseAlpha * (0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16), 0, 1);
 
-      if (charge > 0.02) {
-        // In-place static: small jitter, RGB-channel split, and brightness noise. No displacement.
-        const jitter = charge * 11 * this.pixelRatio;
-        drawX += (hash(particle.homeX * 0.21 + flickerSeed, particle.homeY * 0.13) - 0.5) * jitter;
-        drawY += (hash(particle.homeY * 0.17 + flickerSeed, particle.homeX * 0.11) - 0.5) * jitter;
-        split = charge * splitBase;
-        const noise = hash(particle.homeX + flickerSeed * 2.3, particle.homeY - flickerSeed);
-        alpha *= 1 - charge * noise * 0.6;
+      if (charge > 0.04) {
+        // Pixel-displacement glitch: the square keeps its exact shape but flickers to a nearby
+        // cell (snapped to the grid). A few also drop out for a frame. No colour smear.
+        const roll = hash(particle.homeX * 0.37 + tick * 1.7, particle.homeY * 0.29 - tick);
+        if (roll < charge * 0.8) {
+          const jumpMax = 1 + Math.floor(charge * (2 + glitchSetting * 6));
+          const ox = Math.round((hash(particle.homeX + tick * 2.1, particle.homeY) - 0.5) * 2 * jumpMax);
+          const oy = Math.round((hash(particle.homeY - tick * 1.3, particle.homeX) - 0.5) * 2 * jumpMax);
+          drawX = particle.homeX + ox * cell;
+          drawY = particle.homeY + oy * cell;
+        }
+        if (hash(particle.homeX - tick, particle.homeY + tick * 0.7) < charge * 0.14) {
+          continue; // brief dropout flicker
+        }
       }
 
-      alpha = clamp(alpha, 0, 1);
-      const size = particle.size;
-
-      if (split > 0.5) {
-        ctx.globalCompositeOperation = "lighter";
-        ctx.globalAlpha = alpha;
-        fillCell(ctx, drawX + split, drawY, size, `rgb(${particle.r},0,0)`, rounded, dots);
-        fillCell(ctx, drawX, drawY, size, `rgb(0,${particle.g},0)`, rounded, dots);
-        fillCell(ctx, drawX - split, drawY, size, `rgb(0,0,${particle.b})`, rounded, dots);
-        ctx.globalCompositeOperation = "source-over";
-      } else {
-        ctx.globalAlpha = alpha;
-        fillCell(ctx, drawX, drawY, size, `rgb(${particle.r},${particle.g},${particle.b})`, rounded, dots);
-      }
+      ctx.globalAlpha = alpha;
+      fillCell(ctx, drawX, drawY, particle.size, `rgb(${particle.r},${particle.g},${particle.b})`, rounded, dots);
     }
 
     ctx.globalAlpha = 1;

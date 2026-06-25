@@ -2,7 +2,7 @@
 
 Interactive glyph dither and cursor-displacement effects for images and video.
 
-Glyph Trail is a small Canvas 2D renderer plus a React wrapper that turns image or video sources into interactive pixel-particle artwork. Each cell of the image becomes a square "pixel"; sweeping the cursor through leaves a static-glitch trail (RGB split + jitter + noise) along its path, then settles. It is designed for creative hero sections, portfolio pieces, editorial pages, and pixel/dither-art experiments.
+Glyph Trail is a small Canvas 2D renderer plus a React wrapper that turns image or video sources into interactive pixel-particle artwork. Each cell of the image becomes a square "pixel"; sweeping the cursor through makes the pixels along its path glitch — flickering and jumping to nearby grid cells while keeping their crisp square shape — then settle back. It is designed for creative hero sections, portfolio pieces, editorial pages, and pixel/dither-art experiments.
 
 ![Glyph Trail preview](docs/preview.png)
 
@@ -11,7 +11,7 @@ Glyph Trail is a small Canvas 2D renderer plus a React wrapper that turns image 
 - Framework-agnostic Canvas 2D core — no WebGL required
 - React component wrapper
 - Image, video, canvas, and image-bitmap sources
-- Cursor sweep leaves a fading static-glitch trail (RGB split + jitter + noise) — no displacement
+- Cursor sweep glitches pixels — they flicker and jump to nearby cells (keeping their square shape), then settle
 - Dark-cutoff dithering isolates the subject and scatters the edges
 - Organic (rounded square), dot-matrix, and linear pixel shapes
 - Texture / mono / heat color modes

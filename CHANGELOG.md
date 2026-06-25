@@ -6,4 +6,4 @@
 - React wrapper
 - Interactive demo with live controls
 - Organic (rounded square), dot-matrix, and linear pixel shapes
-- Cursor-driven static-glitch trail (RGB split + jitter + noise), no displacement
+- Cursor-driven pixel-displacement glitch — squares flicker/jump to nearby cells along the cursor path

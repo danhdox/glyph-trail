@@ -200,11 +200,11 @@ export function App() {
             onChange={(value) => updateNumeric("trail", "strength", value)}
           />
           <ControlSlider
-            label="Chromatic"
-            value={settings.trail.chromatic}
+            label="Glitch speed"
+            value={settings.glitch.speed}
             min={0}
             max={100}
-            onChange={(value) => updateNumeric("trail", "chromatic", value)}
+            onChange={(value) => updateNumeric("glitch", "speed", value)}
           />
           <ControlSlider
             label="Glow"
