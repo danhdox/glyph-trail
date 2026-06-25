@@ -7,7 +7,7 @@ const DEMO_SOURCE = "/lotus.jpg";
 
 type PresetId = "lotus" | "cyberPoster" | "softGlow" | "highNoise";
 type ActivePreset = PresetId | "custom";
-type NumericGroup = "adjust" | "dither" | "trail" | "glow";
+type NumericGroup = "adjust" | "dither" | "trail" | "glow" | "glitch";
 
 const presets: Record<PresetId, GlyphTrailSettings> = {
   lotus: normalizeSettings(),
@@ -16,21 +16,24 @@ const presets: Record<PresetId, GlyphTrailSettings> = {
     dither: { threshold: 42, mix: 62, speed: 64 },
     glyph: { scale: 72, gamma: 86, phase: 74, mix: 100, colorMode: "heat" },
     trail: { radius: 72, strength: 66, tail: 58, fluidity: 48, chromatic: 42, noiseScale: 98 },
-    glow: { intensity: 24, spread: 46 }
+    glow: { intensity: 24, spread: 46 },
+    glitch: { intensity: 55, speed: 70 }
   }),
   softGlow: normalizeSettings({
     adjust: { saturation: 158, temperature: 8, contrast: 72 },
     dither: { threshold: 45, mix: 34, speed: 22 },
     glyph: { scale: 92, gamma: 112, phase: 34, mix: 88, colorMode: "texture" },
     trail: { radius: 84, strength: 32, tail: 68, fluidity: 18, chromatic: 10, noiseScale: 38 },
-    glow: { intensity: 32, spread: 76 }
+    glow: { intensity: 32, spread: 76 },
+    glitch: { intensity: 8, speed: 30 }
   }),
   highNoise: normalizeSettings({
     adjust: { saturation: 255, temperature: -28, contrast: 142 },
     dither: { threshold: 54, mix: 94, speed: 88 },
     glyph: { preset: "linear", scale: 64, gamma: 72, phase: 100, mix: 100, colorMode: "mono" },
     trail: { radius: 54, strength: 78, tail: 38, fluidity: 62, chromatic: 60, noiseScale: 100 },
-    glow: { intensity: 12, spread: 34 }
+    glow: { intensity: 12, spread: 34 },
+    glitch: { intensity: 80, speed: 90 }
   })
 };
 
@@ -209,6 +212,13 @@ export function App() {
             min={0}
             max={60}
             onChange={(value) => updateNumeric("glow", "intensity", value)}
+          />
+          <ControlSlider
+            label="Glitch"
+            value={settings.glitch.intensity}
+            min={0}
+            max={100}
+            onChange={(value) => updateNumeric("glitch", "intensity", value)}
           />
 
           <div className="select-row">

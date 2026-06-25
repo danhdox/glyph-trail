@@ -80,6 +80,10 @@ interface GlyphTrailSettings {
     intensity: number;
     spread: number;
   };
+  glitch: {
+    intensity: number; // 0-100 amount of RGB-split + tear-band glitching
+    speed: number; // 0-100 how often glitches fire
+  };
 }
 ```
 

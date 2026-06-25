@@ -45,12 +45,18 @@ export interface GlowSettings {
   spread: number;
 }
 
+export interface GlitchSettings {
+  intensity: number;
+  speed: number;
+}
+
 export interface GlyphTrailSettings {
   adjust: AdjustSettings;
   dither: DitherSettings;
   glyph: GlyphSettings;
   trail: TrailSettings;
   glow: GlowSettings;
+  glitch: GlitchSettings;
 }
 
 export type GlyphTrailSettingsInput = {
@@ -110,6 +116,10 @@ export const defaultSettings: GlyphTrailSettings = {
   glow: {
     intensity: 20,
     spread: 56
+  },
+  glitch: {
+    intensity: 30,
+    speed: 50
   }
 };
 
@@ -119,7 +129,8 @@ export function normalizeSettings(input: GlyphTrailSettingsInput = {}): GlyphTra
     dither: { ...defaultSettings.dither, ...input.dither },
     glyph: { ...defaultSettings.glyph, ...input.glyph },
     trail: { ...defaultSettings.trail, ...input.trail },
-    glow: { ...defaultSettings.glow, ...input.glow }
+    glow: { ...defaultSettings.glow, ...input.glow },
+    glitch: { ...defaultSettings.glitch, ...input.glitch }
   };
 }
 
@@ -343,7 +354,8 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
         dither: { ...this.settings.dither, ...options.settings.dither },
         glyph: { ...this.settings.glyph, ...options.settings.glyph },
         trail: { ...this.settings.trail, ...options.settings.trail },
-        glow: { ...this.settings.glow, ...options.settings.glow }
+        glow: { ...this.settings.glow, ...options.settings.glow },
+        glitch: { ...this.settings.glitch, ...options.settings.glitch }
       });
       this.rebuild();
     }
@@ -579,6 +591,28 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const dots = settings.glyph.preset === "dot-matrix";
     const pointerActive = this.pointer.active && !this.reducedMotion && settings.trail.strength > 0;
 
+    // Glitch pass: horizontal tear bands + RGB-split bursts, refreshed a few times a second.
+    const glitch = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
+    const tickMs = mix(150, 45, clamp(settings.glitch.speed / 100, 0, 1));
+    const tick = Math.floor(time / tickMs);
+    const bands: { y0: number; y1: number; shift: number }[] = [];
+    let globalSplit = 0;
+    if (glitch > 0) {
+      if (hash(tick * 1.3, 7.7) < glitch * 0.5) {
+        globalSplit = (hash(tick, 2.2) - 0.5) * glitch * 16 * this.pixelRatio;
+      }
+      const maxBands = Math.round(1 + glitch * 5);
+      for (let i = 0; i < maxBands; i += 1) {
+        if (hash(tick + i * 13.1, 3.7) < 0.22 + glitch * 0.4) {
+          const cy = hash(tick * 1.7 + i, 5.5) * height;
+          const bandHeight = (0.012 + hash(tick + i, 8.3) * 0.06) * height;
+          const shift = (hash(tick + i, 9.9) - 0.5) * glitch * 70 * this.pixelRatio;
+          bands.push({ y0: cy - bandHeight / 2, y1: cy + bandHeight / 2, shift });
+        }
+      }
+    }
+    const bandSplit = glitch * 9 * this.pixelRatio;
+
     for (const particle of this.particles) {
       if (particle.baseAlpha <= 0.01) {
         continue;
@@ -602,22 +636,35 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       particle.x += (targetX - particle.x) * ease;
       particle.y += (targetY - particle.y) * ease;
 
+      let bandShift = 0;
+      let inBand = false;
+      for (const band of bands) {
+        if (particle.homeY >= band.y0 && particle.homeY <= band.y1) {
+          bandShift += band.shift;
+          inBand = true;
+        }
+      }
+
+      const drawX = particle.x + bandShift;
+      const drawY = particle.y;
+      const displaced = Math.abs(particle.x - particle.homeX) + Math.abs(particle.y - particle.homeY);
+      const chromaSplit = chroma > 0.2 && displaced > 0.6 ? Math.min(chroma, displaced * 0.5) : 0;
+      const split = chromaSplit + Math.abs(globalSplit) + (inBand ? bandSplit : 0);
+
       const shimmer = 0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16;
       const alpha = clamp(particle.baseAlpha * shimmer, 0, 1);
       const size = particle.size;
-      const displaced = Math.abs(particle.x - particle.homeX) + Math.abs(particle.y - particle.homeY);
 
-      if (chroma > 0.2 && displaced > 0.6) {
-        const offset = Math.min(chroma, displaced * 0.5);
+      if (split > 0.5) {
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = alpha;
-        fillCell(ctx, particle.x + offset, particle.y, size, `rgb(${particle.r},0,0)`, rounded, dots);
-        fillCell(ctx, particle.x, particle.y, size, `rgb(0,${particle.g},0)`, rounded, dots);
-        fillCell(ctx, particle.x - offset, particle.y, size, `rgb(0,0,${particle.b})`, rounded, dots);
+        fillCell(ctx, drawX + split, drawY, size, `rgb(${particle.r},0,0)`, rounded, dots);
+        fillCell(ctx, drawX, drawY, size, `rgb(0,${particle.g},0)`, rounded, dots);
+        fillCell(ctx, drawX - split, drawY, size, `rgb(0,0,${particle.b})`, rounded, dots);
         ctx.globalCompositeOperation = "source-over";
       } else {
         ctx.globalAlpha = alpha;
-        fillCell(ctx, particle.x, particle.y, size, `rgb(${particle.r},${particle.g},${particle.b})`, rounded, dots);
+        fillCell(ctx, drawX, drawY, size, `rgb(${particle.r},${particle.g},${particle.b})`, rounded, dots);
       }
     }
 

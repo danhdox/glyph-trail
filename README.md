@@ -69,7 +69,8 @@ export function Hero() {
           momentum: 0,
           noiseScale: 86
         },
-        glow: { intensity: 18, spread: 52 }
+        glow: { intensity: 20, spread: 56 },
+        glitch: { intensity: 30, speed: 50 }
       }}
     />
   );
