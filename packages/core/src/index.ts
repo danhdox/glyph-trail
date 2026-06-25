@@ -89,13 +89,13 @@ export const defaultSettings: GlyphTrailSettings = {
     contrast: 100
   },
   dither: {
-    threshold: 50,
-    mix: 50,
-    speed: 50
+    threshold: 30,
+    mix: 38,
+    speed: 42
   },
   glyph: {
     preset: "organic",
-    scale: 84,
+    scale: 92,
     gamma: 100,
     phase: 100,
     mix: 100,
@@ -114,12 +114,12 @@ export const defaultSettings: GlyphTrailSettings = {
     noiseScale: 86
   },
   glow: {
-    intensity: 20,
-    spread: 56
+    intensity: 34,
+    spread: 62
   },
   glitch: {
-    intensity: 45,
-    speed: 50
+    intensity: 38,
+    speed: 42
   }
 };
 
@@ -161,71 +161,68 @@ export function paintDemoLotus(context: CanvasRenderingContext2D, width: number,
   context.fillStyle = "#020203";
   context.fillRect(0, 0, width, height);
 
-  const centerX = width * 0.5;
-  const centerY = height * 0.5;
-  const baseRadius = Math.min(width, height) * 0.46;
-  const pulse = 1 + Math.sin(time * 0.0014) * 0.025;
+  const centerX = width * 0.53;
+  const centerY = height * 0.47;
+  const petalCount = 26;
+  const pulse = Math.sin(time * 0.0016) * 0.04;
+
+  const halo = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, width * 0.42);
+  halo.addColorStop(0, "rgba(255, 225, 115, 0.28)");
+  halo.addColorStop(0.3, "rgba(255, 76, 146, 0.19)");
+  halo.addColorStop(0.7, "rgba(130, 44, 92, 0.08)");
+  halo.addColorStop(1, "rgba(0, 0, 0, 0)");
+  context.fillStyle = halo;
+  context.fillRect(0, 0, width, height);
 
   context.save();
   context.translate(centerX, centerY);
   context.globalCompositeOperation = "screen";
 
-  const halo = context.createRadialGradient(0, 0, 0, 0, 0, baseRadius * 0.98);
-  halo.addColorStop(0, "rgba(255, 214, 140, 0.18)");
-  halo.addColorStop(0.4, "rgba(255, 110, 150, 0.09)");
-  halo.addColorStop(0.75, "rgba(150, 50, 110, 0.03)");
-  halo.addColorStop(1, "rgba(0, 0, 0, 0)");
-  context.fillStyle = halo;
-  context.beginPath();
-  context.arc(0, 0, baseRadius * 0.98, 0, Math.PI * 2);
-  context.fill();
+  for (let index = 0; index < petalCount; index += 1) {
+    const ring = index % 3;
+    const angle = (Math.PI * 2 * index) / petalCount + ring * 0.07 + pulse;
+    const length = width * (0.112 + ring * 0.04);
+    const breadth = height * (0.034 + ring * 0.015);
+    const offset = width * (0.018 + ring * 0.023);
+    const hueShift = Math.sin(index * 1.7 + time * 0.001) * 18;
 
-  const rings = [
-    { count: 13, radius: 0.8, size: 0.46, hueA: 320, hueB: 292, light: 56, alpha: 0.44 },
-    { count: 11, radius: 0.62, size: 0.44, hueA: 332, hueB: 312, light: 60, alpha: 0.5 },
-    { count: 9, radius: 0.44, size: 0.4, hueA: 346, hueB: 20, light: 64, alpha: 0.56 },
-    { count: 7, radius: 0.28, size: 0.34, hueA: 28, hueB: 44, light: 68, alpha: 0.62 }
-  ];
+    context.save();
+    context.rotate(angle);
+    context.translate(offset, 0);
+    context.scale(1, ring === 0 ? 0.72 : 1);
 
-  for (const [r, ring] of rings.entries()) {
-    const ringRadius = baseRadius * ring.radius * pulse;
-    const petalLen = baseRadius * ring.size;
-    const petalWide = petalLen * 0.66;
+    const gradient = context.createRadialGradient(length * 0.12, 0, 0, length * 0.24, 0, length);
+    gradient.addColorStop(0, `hsla(${50 + hueShift}, 100%, 70%, 0.98)`);
+    gradient.addColorStop(0.32, `hsla(${336 + hueShift}, 92%, 68%, 0.86)`);
+    gradient.addColorStop(0.72, `hsla(${318 + hueShift}, 76%, 48%, 0.38)`);
+    gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+    context.fillStyle = gradient;
 
-    for (let i = 0; i < ring.count; i += 1) {
-      const wobble = Math.sin(i * 2.3 + r + time * 0.0009) * 0.06;
-      const angle = (Math.PI * 2 * i) / ring.count + r * 0.4 + wobble;
-      const px = Math.cos(angle) * ringRadius;
-      const py = Math.sin(angle) * ringRadius;
-      const hue = ring.hueA + (ring.hueB - ring.hueA) * (0.5 + 0.5 * Math.sin(i * 1.7 + r));
-
-      context.save();
-      context.translate(px, py);
-      context.rotate(angle);
-      context.scale(petalLen, petalWide);
-      const petal = context.createRadialGradient(0, 0, 0, 0, 0, 1);
-      petal.addColorStop(0, `hsla(${hue}, 95%, ${ring.light}%, ${ring.alpha})`);
-      petal.addColorStop(0.55, `hsla(${hue}, 90%, ${ring.light - 14}%, ${ring.alpha * 0.5})`);
-      petal.addColorStop(1, "rgba(0, 0, 0, 0)");
-      context.fillStyle = petal;
-      context.beginPath();
-      context.arc(0, 0, 1, 0, Math.PI * 2);
-      context.fill();
-      context.restore();
-    }
+    context.beginPath();
+    context.moveTo(0, 0);
+    context.bezierCurveTo(length * 0.18, -breadth * 1.4, length * 0.82, -breadth * 1.1, length, 0);
+    context.bezierCurveTo(length * 0.78, breadth * 1.18, length * 0.2, breadth * 1.22, 0, 0);
+    context.closePath();
+    context.fill();
+    context.restore();
   }
 
-  const core = context.createRadialGradient(0, 0, 0, 0, 0, baseRadius * 0.3);
-  core.addColorStop(0, "rgba(255, 240, 170, 0.72)");
-  core.addColorStop(0.35, "rgba(255, 200, 95, 0.5)");
-  core.addColorStop(0.72, "rgba(255, 120, 80, 0.22)");
+  context.restore();
+
+  const core = context.createRadialGradient(centerX, centerY - height * 0.035, 0, centerX, centerY, width * 0.16);
+  core.addColorStop(0, "rgba(255, 244, 120, 0.98)");
+  core.addColorStop(0.34, "rgba(255, 160, 66, 0.78)");
+  core.addColorStop(0.74, "rgba(242, 48, 128, 0.42)");
   core.addColorStop(1, "rgba(0, 0, 0, 0)");
   context.fillStyle = core;
-  context.beginPath();
-  context.arc(0, 0, baseRadius * 0.3, 0, Math.PI * 2);
-  context.fill();
+  context.fillRect(0, 0, width, height);
 
-  context.restore();
+  context.strokeStyle = "rgba(116, 190, 124, 0.22)";
+  context.lineWidth = Math.max(2, width * 0.004);
+  context.beginPath();
+  context.moveTo(centerX - width * 0.018, centerY + height * 0.13);
+  context.bezierCurveTo(centerX - width * 0.04, centerY + height * 0.31, centerX - width * 0.02, height * 0.92, centerX - width * 0.052, height);
+  context.stroke();
 }
 
 interface Particle {
@@ -238,13 +235,14 @@ interface Particle {
   g: number;
   b: number;
   baseAlpha: number;
+  luma: number;
   phase: number;
 }
 
 /**
- * Renders a source image/video as a grid of square "pixel" particles. Moving the
- * pointer pushes nearby particles away from their home cell; they then ease back into
- * place. Dark cells are dropped so the subject sits on black and the edges scatter.
+ * Renders a source image/video as a dense glyph-dot field. Moving the pointer
+ * pulls nearby dots through a short-lived displacement trail while the base image
+ * keeps its soft photographic color and glow.
  */
 class GlyphTrailRenderer implements GlyphTrailInstance {
   readonly canvas: HTMLCanvasElement;
@@ -271,7 +269,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
   private settings: GlyphTrailSettings;
   private source?: GlyphTrailElementSource;
   private sourceToken = 0;
-  private sourceIsVideo = false;
+  private sourceIsDynamic = false;
   private particles: Particle[] = [];
   private cols = 0;
   private rows = 0;
@@ -391,7 +389,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
 
     if (typeof input !== "string") {
       this.source = input;
-      this.sourceIsVideo = input instanceof HTMLVideoElement;
+      this.sourceIsDynamic = input instanceof HTMLVideoElement || input instanceof HTMLCanvasElement;
       this.rebuild();
       return;
     }
@@ -401,7 +399,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
         return;
       }
       this.source = source;
-      this.sourceIsVideo = source instanceof HTMLVideoElement;
+      this.sourceIsDynamic = source instanceof HTMLVideoElement;
       this.rebuild();
     });
   }
@@ -461,10 +459,10 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       return;
     }
 
-    const cellCss = mix(14, 4.5, clamp(this.settings.glyph.scale / 120, 0, 1));
+    const cellCss = mix(8.2, 3.2, clamp(this.settings.glyph.scale / 120, 0, 1));
     const cell = Math.max(3, Math.round(cellCss * this.pixelRatio));
-    const gap = Math.max(1, Math.round(2 * this.pixelRatio));
-    const drawSize = Math.max(1, cell - gap);
+    const gap = Math.max(0.75, cell * 0.24);
+    const drawSize = Math.max(1.2, cell - gap);
 
     const cols = Math.max(1, Math.floor(width / cell));
     const rows = Math.max(1, Math.floor(height / cell));
@@ -491,6 +489,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
           g: 0,
           b: 0,
           baseAlpha: 0,
+          luma: 0,
           phase: hash(x + 0.5, y + 0.5) * Math.PI * 2
         };
       }
@@ -529,9 +528,11 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     }
 
     const settings = this.settings;
-    const cutoff = 8 + (settings.dither.threshold / 100) * 120;
-    const scatter = (settings.dither.mix / 100) * 80;
+    const cutoff = 12 + (settings.dither.threshold / 100) * 88;
+    const feather = 18 + (settings.dither.mix / 100) * 34;
+    const scatter = (settings.dither.mix / 100) * 52;
     const mixAlpha = clamp(settings.glyph.mix / 100, 0, 1);
+    const gammaCurve = mix(1.35, 0.52, clamp(settings.glyph.gamma / 100, 0, 1));
 
     let sumX = 0;
     let sumY = 0;
@@ -551,17 +552,30 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
         const a = data[index + 3] ?? 0;
         const brightness = r * 0.299 + g * 0.587 + b * 0.114;
         const jitter = (hash(x * 1.7, y * 1.7) - 0.5) * scatter;
+        const density = Math.pow(clamp((brightness + jitter) / 255, 0, 1), gammaCurve) * 255;
+        const alphaGate = smoothstep(cutoff - feather, cutoff + feather * 1.25, density);
 
-        if (a < 45 || brightness < cutoff + jitter) {
+        if (a < 35 || alphaGate <= 0.018) {
           particle.baseAlpha = 0;
+          particle.luma = 0;
           continue;
         }
 
         const color = shadeColor(r, g, b, settings);
+        const nx = cols > 1 ? x / (cols - 1) : 0.5;
+        const ny = rows > 1 ? y / (rows - 1) : 0.5;
+        const warmCore = Math.exp(-((nx - 0.5) ** 2 / 0.026 + (ny - 0.46) ** 2 / 0.042));
+        const highlightWarmth = smoothstep(0.28, 0.82, brightness / 255) * warmCore;
+        if (highlightWarmth > 0.01 && settings.glyph.colorMode === "texture") {
+          color[0] = Math.round(lerp(color[0], 255, highlightWarmth * 0.72));
+          color[1] = Math.round(lerp(color[1], 188, highlightWarmth * 0.62));
+          color[2] = Math.round(lerp(color[2], 50, highlightWarmth * 0.78));
+        }
         particle.r = color[0];
         particle.g = color[1];
         particle.b = color[2];
-        particle.baseAlpha = (a / 255) * mixAlpha;
+        particle.luma = clamp(brightness / 255, 0, 1);
+        particle.baseAlpha = clamp((a / 255) * mixAlpha * (0.22 + alphaGate * 0.9), 0, 1);
         sumX += particle.homeX;
         sumY += particle.homeY;
         visible += 1;
@@ -589,7 +603,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       return;
     }
 
-    if (this.sourceIsVideo && this.source && isSourceReady(this.source)) {
+    if (this.sourceIsDynamic && this.source && isSourceReady(this.source)) {
       this.sampleColors();
     }
 
@@ -607,6 +621,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     ctx.globalCompositeOperation = "source-over";
 
     this.drawGlow(width, height);
+    this.drawRays(width, height, time);
 
     const reach = mix(40, 200, clamp(settings.trail.radius / 100, 0, 1)) * this.pixelRatio;
     const reachSq = reach * reach;
@@ -617,7 +632,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const dots = settings.glyph.preset === "dot-matrix";
     const glitchSetting = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
     const cell = this.cell || 1;
-    const dragCells = 0.4 + glitchSetting * 2.2; // how far (in cells) a pixel drags at full charge
+    const dragCells = 0.18 + glitchSetting * 1.22;
 
     // Age the cursor trail and drop spent points. The glitch lives only along recent movement.
     for (const point of this.pointerTrail) {
@@ -662,20 +677,32 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
 
       let drawX = particle.homeX;
       let drawY = particle.homeY;
-      const alpha = clamp(particle.baseAlpha * (0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16), 0, 1);
+      const shimmer = 0.9 + Math.sin(time * shimmerSpeed + particle.phase) * 0.1;
+      const alpha = clamp(particle.baseAlpha * shimmer, 0, 1);
 
       if (charge > 0.01) {
-        // Liquid directional drag: pull each pixel a little along the cursor's travel direction,
-        // a dithered amount per pixel, easing back to home as the trail fades. The square keeps
-        // its shape (a smooth rigid offset) — it flows with the cursor instead of scattering.
         const dither = 0.5 + hash(particle.homeX * 0.5, particle.homeY * 0.5);
         const drag = charge * dragCells * dither * cell;
-        drawX = particle.homeX + dirX * drag;
-        drawY = particle.homeY + dirY * drag;
+        const swirl = (hash(particle.homeX * 0.12, particle.homeY * 0.12) - 0.5) * Math.PI * 0.42;
+        const cos = Math.cos(swirl);
+        const sin = Math.sin(swirl);
+        drawX = particle.homeX + (dirX * cos - dirY * sin) * drag;
+        drawY = particle.homeY + (dirX * sin + dirY * cos) * drag;
       }
 
       ctx.globalAlpha = alpha;
-      fillCell(ctx, drawX, drawY, particle.size, `rgb(${particle.r},${particle.g},${particle.b})`, rounded, dots);
+      const lumaSize = mix(0.62, 1.12, Math.sqrt(particle.luma));
+      const drawSize = particle.size * lumaSize;
+      const inset = (particle.size - drawSize) / 2;
+      fillCell(
+        ctx,
+        drawX + inset,
+        drawY + inset,
+        drawSize,
+        `rgb(${particle.r},${particle.g},${particle.b})`,
+        rounded,
+        dots
+      );
     }
 
     ctx.globalAlpha = 1;
@@ -707,6 +734,43 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     this.ctx.fillRect(0, 0, width, height);
     this.ctx.globalCompositeOperation = "source-over";
   }
+
+  private drawRays(width: number, height: number, time: number): void {
+    const intensity = clamp(this.settings.glow.intensity / 100, 0, 1);
+    if (intensity <= 0.02 || this.particles.length === 0) {
+      return;
+    }
+
+    const ctx = this.ctx;
+    const rayCount = 28;
+    const span = Math.max(width, height);
+    const alpha = intensity * 0.34;
+    const centerX = this.centroidX;
+    const centerY = this.centroidY - height * 0.03;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.filter = `blur(${Math.max(1.1, this.pixelRatio * 1.6)}px)`;
+
+    for (let index = 0; index < rayCount; index += 1) {
+      const offset = (index - rayCount / 2) * this.cell * 0.46;
+      const wave = Math.sin(time * 0.0013 + index * 0.9) * this.cell * 0.38;
+      const y = centerY + offset + wave;
+      const heightBand = Math.max(1, this.pixelRatio * (1.2 + (index % 4) * 0.7));
+      const left = Math.max(0, centerX - span * 0.72);
+      const right = Math.min(width, centerX + span * 0.12);
+      const gradient = ctx.createLinearGradient(left, y, right, y);
+      gradient.addColorStop(0, "rgba(255, 180, 210, 0)");
+      gradient.addColorStop(0.16, `rgba(255, 170, 215, ${alpha * 0.42})`);
+      gradient.addColorStop(0.48, `rgba(255, 226, 196, ${alpha})`);
+      gradient.addColorStop(0.66, `rgba(255, 132, 184, ${alpha * 0.38})`);
+      gradient.addColorStop(1, "rgba(255, 180, 210, 0)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(left, y, right - left, heightBand);
+    }
+
+    ctx.restore();
+  }
 }
 
 function fillCell(
@@ -720,7 +784,7 @@ function fillCell(
 ): void {
   ctx.fillStyle = color;
 
-  if (dot) {
+  if (dot || rounded) {
     const r = size / 2;
     ctx.beginPath();
     ctx.arc(x + r, y + r, r, 0, Math.PI * 2);

@@ -52,6 +52,7 @@ export function App() {
   const [settings, setSettings] = useState<GlyphTrailSettings>(() => normalizeSettings());
   const [activePreset, setActivePreset] = useState<ActivePreset>("lotus");
   const [paused, setPaused] = useState(prefersReducedMotion);
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const snippet = useMemo(() => buildSnippet(settings), [settings]);
@@ -113,140 +114,151 @@ export function App() {
           aria-label="Lotus flower rendered as interactive glyph pixels"
         />
 
-        <header className="topbar">
-          <a className="wordmark" href="#top" aria-label="Glyph Trail home">
-            <span>Glyph</span>
-            <span>Trail</span>
-          </a>
-          <nav className="nav-links" aria-label="Project links">
-            <a href="#install">Install</a>
-            <a href="#api">API</a>
-            <a href="https://github.com/Andrewdddobusiness/glyph-trail" target="_blank" rel="noreferrer">
-              <Github size={16} aria-hidden="true" />
-              GitHub
-            </a>
-          </nav>
-        </header>
-
         <div className="poster-copy" id="top">
-          <p className="vertical-label">Canvas pixel effect</p>
+          <p className="vertical-label">11/06/2026</p>
           <h1>LOTUS</h1>
-          <p className="poster-meta">Interactive glyph dither for images and video</p>
+          <p className="poster-meta">Artisanal gardens<br />Live music</p>
         </div>
 
-        <div className="preset-strip" aria-label="Preset controls">
-          {(Object.keys(presets) as PresetId[]).map((preset) => (
-            <button
-              className={preset === activePreset ? "preset-button active" : "preset-button"}
-              key={preset}
-              type="button"
-              onClick={() => applyPreset(preset)}
-            >
-              {presetLabels[preset]}
-            </button>
-          ))}
-          <button className="icon-button" type="button" onClick={() => setPaused((value) => !value)}>
-            {paused ? <Play size={17} aria-hidden="true" /> : <Pause size={17} aria-hidden="true" />}
-            <span>{paused ? "Play" : "Pause"}</span>
-          </button>
+        <p className="poster-kicker">Immerse yourself<br />in a world of vibrant<br />color</p>
+
+        <div className="project-links" aria-label="Project links">
+          <a href="#install">Install</a>
+          <a href="#api">API</a>
+          <a href="https://github.com/danhdox/glyph-trail" target="_blank" rel="noreferrer">
+            <Github size={13} aria-hidden="true" />
+            GitHub
+          </a>
         </div>
 
-        <aside className="control-dock" aria-label="Effect controls">
-          <div className="dock-heading">
-            <SlidersHorizontal size={18} aria-hidden="true" />
-            <span>Live Controls</span>
-          </div>
+        <button
+          className="control-toggle"
+          type="button"
+          aria-expanded={controlsOpen}
+          aria-controls="effect-controls"
+          onClick={() => setControlsOpen((value) => !value)}
+        >
+          <SlidersHorizontal size={14} aria-hidden="true" />
+          Controls
+        </button>
 
-          <ControlSlider
-            label="Glyph scale"
-            value={settings.glyph.scale}
-            min={20}
-            max={120}
-            onChange={(value) => updateGlyph("scale", value)}
-          />
-          <ControlSlider
-            label="Glyph mix"
-            value={settings.glyph.mix}
-            min={0}
-            max={100}
-            onChange={(value) => updateGlyph("mix", value)}
-          />
-          <ControlSlider
-            label="Dither mix"
-            value={settings.dither.mix}
-            min={0}
-            max={100}
-            onChange={(value) => updateNumeric("dither", "mix", value)}
-          />
-          <ControlSlider
-            label="Threshold"
-            value={settings.dither.threshold}
-            min={0}
-            max={100}
-            onChange={(value) => updateNumeric("dither", "threshold", value)}
-          />
-          <ControlSlider
-            label="Trail radius"
-            value={settings.trail.radius}
-            min={0}
-            max={100}
-            onChange={(value) => updateNumeric("trail", "radius", value)}
-          />
-          <ControlSlider
-            label="Trail strength"
-            value={settings.trail.strength}
-            min={0}
-            max={100}
-            onChange={(value) => updateNumeric("trail", "strength", value)}
-          />
-          <ControlSlider
-            label="Glitch speed"
-            value={settings.glitch.speed}
-            min={0}
-            max={100}
-            onChange={(value) => updateNumeric("glitch", "speed", value)}
-          />
-          <ControlSlider
-            label="Glow"
-            value={settings.glow.intensity}
-            min={0}
-            max={60}
-            onChange={(value) => updateNumeric("glow", "intensity", value)}
-          />
-          <ControlSlider
-            label="Glitch"
-            value={settings.glitch.intensity}
-            min={0}
-            max={100}
-            onChange={(value) => updateNumeric("glitch", "intensity", value)}
-          />
+        {controlsOpen ? (
+          <aside className="control-dock" id="effect-controls" aria-label="Effect controls">
+            <div className="dock-heading">
+              <SlidersHorizontal size={18} aria-hidden="true" />
+              <span>Live Controls</span>
+            </div>
 
-          <div className="select-row">
-            <label htmlFor="glyph-preset">Glyph preset</label>
-            <select
-              id="glyph-preset"
-              value={settings.glyph.preset}
-              onChange={(event) => updateGlyph("preset", event.target.value as GlyphTrailSettings["glyph"]["preset"])}
-            >
-              <option value="organic">Organic</option>
-              <option value="linear">Linear</option>
-              <option value="dot-matrix">Dot Matrix</option>
-            </select>
-          </div>
+            <div className="preset-strip" aria-label="Preset controls">
+              {(Object.keys(presets) as PresetId[]).map((preset) => (
+                <button
+                  className={preset === activePreset ? "preset-button active" : "preset-button"}
+                  key={preset}
+                  type="button"
+                  onClick={() => applyPreset(preset)}
+                >
+                  {presetLabels[preset]}
+                </button>
+              ))}
+              <button className="icon-button" type="button" onClick={() => setPaused((value) => !value)}>
+                {paused ? <Play size={17} aria-hidden="true" /> : <Pause size={17} aria-hidden="true" />}
+                <span>{paused ? "Play" : "Pause"}</span>
+              </button>
+            </div>
 
-          <div className="select-row">
-            <label htmlFor="color-mode">Color mode</label>
-            <select
-              id="color-mode"
-              value={settings.glyph.colorMode}
-              onChange={(event) => updateGlyph("colorMode", event.target.value as GlyphTrailSettings["glyph"]["colorMode"])}
-            >
-              <option value="texture">Texture</option>
-              <option value="mono">Mono</option>
-              <option value="heat">Heat</option>
-            </select>
-          </div>
-        </aside>
+            <ControlSlider
+              label="Glyph scale"
+              value={settings.glyph.scale}
+              min={20}
+              max={120}
+              onChange={(value) => updateGlyph("scale", value)}
+            />
+            <ControlSlider
+              label="Glyph mix"
+              value={settings.glyph.mix}
+              min={0}
+              max={100}
+              onChange={(value) => updateGlyph("mix", value)}
+            />
+            <ControlSlider
+              label="Dither mix"
+              value={settings.dither.mix}
+              min={0}
+              max={100}
+              onChange={(value) => updateNumeric("dither", "mix", value)}
+            />
+            <ControlSlider
+              label="Threshold"
+              value={settings.dither.threshold}
+              min={0}
+              max={100}
+              onChange={(value) => updateNumeric("dither", "threshold", value)}
+            />
+            <ControlSlider
+              label="Trail radius"
+              value={settings.trail.radius}
+              min={0}
+              max={100}
+              onChange={(value) => updateNumeric("trail", "radius", value)}
+            />
+            <ControlSlider
+              label="Trail strength"
+              value={settings.trail.strength}
+              min={0}
+              max={100}
+              onChange={(value) => updateNumeric("trail", "strength", value)}
+            />
+            <ControlSlider
+              label="Glitch speed"
+              value={settings.glitch.speed}
+              min={0}
+              max={100}
+              onChange={(value) => updateNumeric("glitch", "speed", value)}
+            />
+            <ControlSlider
+              label="Glow"
+              value={settings.glow.intensity}
+              min={0}
+              max={60}
+              onChange={(value) => updateNumeric("glow", "intensity", value)}
+            />
+            <ControlSlider
+              label="Glitch"
+              value={settings.glitch.intensity}
+              min={0}
+              max={100}
+              onChange={(value) => updateNumeric("glitch", "intensity", value)}
+            />
+
+            <div className="select-row">
+              <label htmlFor="glyph-preset">Glyph preset</label>
+              <select
+                id="glyph-preset"
+                value={settings.glyph.preset}
+                onChange={(event) => updateGlyph("preset", event.target.value as GlyphTrailSettings["glyph"]["preset"])}
+              >
+                <option value="organic">Organic</option>
+                <option value="linear">Linear</option>
+                <option value="dot-matrix">Dot Matrix</option>
+              </select>
+            </div>
+
+            <div className="select-row">
+              <label htmlFor="color-mode">Color mode</label>
+              <select
+                id="color-mode"
+                value={settings.glyph.colorMode}
+                onChange={(event) =>
+                  updateGlyph("colorMode", event.target.value as GlyphTrailSettings["glyph"]["colorMode"])
+                }
+              >
+                <option value="texture">Texture</option>
+                <option value="mono">Mono</option>
+                <option value="heat">Heat</option>
+              </select>
+            </div>
+          </aside>
+        ) : null}
       </section>
 
       <section className="docs-band" id="install">
