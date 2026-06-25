@@ -253,7 +253,14 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
   private readonly sampler: HTMLCanvasElement;
   private readonly samplerCtx: CanvasRenderingContext2D;
   private readonly pointer = { x: 0, y: 0, active: false };
-  private readonly pointerTrail: { x: number; y: number; age: number; strength: number }[] = [];
+  private readonly pointerTrail: {
+    x: number;
+    y: number;
+    age: number;
+    strength: number;
+    dirX: number;
+    dirY: number;
+  }[] = [];
   private readonly reducedMotion: boolean;
   private readonly resizeObserver?: ResizeObserver;
   private readonly pointerMoveHandler = (event: PointerEvent) => this.onPointerMove(event);
@@ -407,11 +414,14 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const nextX = ((event.clientX - rect.left) / rect.width) * this.canvas.width;
     const nextY = ((event.clientY - rect.top) / rect.height) * this.canvas.height;
     if (this.pointer.active) {
-      const distance = Math.hypot(nextX - this.pointer.x, nextY - this.pointer.y);
+      const dx = nextX - this.pointer.x;
+      const dy = nextY - this.pointer.y;
+      const distance = Math.hypot(dx, dy);
       const speedRef = mix(22, 5, clamp(this.settings.glitch.speed / 100, 0, 1)) * this.pixelRatio;
       const strength = clamp(distance / Math.max(speedRef, 1), 0, 1);
       if (strength > 0.02) {
-        this.pointerTrail.unshift({ x: nextX, y: nextY, age: 0, strength });
+        const inv = 1 / Math.max(distance, 1);
+        this.pointerTrail.unshift({ x: nextX, y: nextY, age: 0, strength, dirX: dx * inv, dirY: dy * inv });
         if (this.pointerTrail.length > 28) {
           this.pointerTrail.length = 28;
         }
@@ -631,6 +641,8 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       }
 
       let charge = 0;
+      let dirX = 0;
+      let dirY = 0;
       if (glitchActive) {
         for (const point of this.pointerTrail) {
           const dx = particle.homeX - point.x;
@@ -642,6 +654,8 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
             const value = falloff * point.strength * ageFade;
             if (value > charge) {
               charge = value;
+              dirX = point.dirX;
+              dirY = point.dirY;
             }
           }
         }
@@ -653,18 +667,19 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       const alpha = clamp(particle.baseAlpha * (0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16), 0, 1);
 
       if (charge > 0.04) {
-        // Pixel-displacement glitch: the square keeps its exact shape but flickers to a nearby
-        // cell (snapped to the grid). A few also drop out for a frame. No colour smear.
+        // Directional pixel-displacement glitch: the square keeps its exact shape but streaks
+        // along the cursor's travel direction (snapped to the grid), a dithered distance per
+        // pixel. Re-rolled each tick so it flickers; pixels move the way the cursor moved
+        // rather than scattering randomly or vanishing.
         const roll = hash(particle.homeX * 0.37 + tick * 1.7, particle.homeY * 0.29 - tick);
-        if (roll < charge * 0.8) {
-          const jumpMax = 1 + Math.floor(charge * (2 + glitchSetting * 6));
-          const ox = Math.round((hash(particle.homeX + tick * 2.1, particle.homeY) - 0.5) * 2 * jumpMax);
-          const oy = Math.round((hash(particle.homeY - tick * 1.3, particle.homeX) - 0.5) * 2 * jumpMax);
+        if (roll < charge * 0.7) {
+          const reachCells = 1 + charge * (2 + glitchSetting * 7);
+          const along = (0.25 + hash(particle.homeX + tick * 2.1, particle.homeY) * 0.75) * reachCells;
+          const perp = (hash(particle.homeY - tick * 1.3, particle.homeX) - 0.5) * 1.6;
+          const ox = Math.round(dirX * along - dirY * perp);
+          const oy = Math.round(dirY * along + dirX * perp);
           drawX = particle.homeX + ox * cell;
           drawY = particle.homeY + oy * cell;
-        }
-        if (hash(particle.homeX - tick, particle.homeY + tick * 0.7) < charge * 0.14) {
-          continue; // brief dropout flicker
         }
       }
 
