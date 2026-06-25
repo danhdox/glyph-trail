@@ -617,9 +617,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const dots = settings.glyph.preset === "dot-matrix";
     const glitchSetting = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
     const cell = this.cell || 1;
-    // Flicker tick: the per-pixel jump targets re-roll a few times a second so pixels
-    // appear to flicker between their home and nearby cells. Faster speed = faster flicker.
-    const tick = Math.floor(time / mix(120, 45, clamp(settings.glitch.speed / 100, 0, 1)));
+    const dragCells = 0.4 + glitchSetting * 2.2; // how far (in cells) a pixel drags at full charge
 
     // Age the cursor trail and drop spent points. The glitch lives only along recent movement.
     for (const point of this.pointerTrail) {
@@ -666,21 +664,14 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       let drawY = particle.homeY;
       const alpha = clamp(particle.baseAlpha * (0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16), 0, 1);
 
-      if (charge > 0.04) {
-        // Directional pixel-displacement glitch: the square keeps its exact shape but streaks
-        // along the cursor's travel direction (snapped to the grid), a dithered distance per
-        // pixel. Re-rolled each tick so it flickers; pixels move the way the cursor moved
-        // rather than scattering randomly or vanishing.
-        const roll = hash(particle.homeX * 0.37 + tick * 1.7, particle.homeY * 0.29 - tick);
-        if (roll < charge * 0.7) {
-          const reachCells = 1 + charge * (2 + glitchSetting * 7);
-          const along = (0.25 + hash(particle.homeX + tick * 2.1, particle.homeY) * 0.75) * reachCells;
-          const perp = (hash(particle.homeY - tick * 1.3, particle.homeX) - 0.5) * 1.6;
-          const ox = Math.round(dirX * along - dirY * perp);
-          const oy = Math.round(dirY * along + dirX * perp);
-          drawX = particle.homeX + ox * cell;
-          drawY = particle.homeY + oy * cell;
-        }
+      if (charge > 0.01) {
+        // Liquid directional drag: pull each pixel a little along the cursor's travel direction,
+        // a dithered amount per pixel, easing back to home as the trail fades. The square keeps
+        // its shape (a smooth rigid offset) — it flows with the cursor instead of scattering.
+        const dither = 0.5 + hash(particle.homeX * 0.5, particle.homeY * 0.5);
+        const drag = charge * dragCells * dither * cell;
+        drawX = particle.homeX + dirX * drag;
+        drawY = particle.homeY + dirY * drag;
       }
 
       ctx.globalAlpha = alpha;

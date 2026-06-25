@@ -81,8 +81,8 @@ interface GlyphTrailSettings {
     spread: number;
   };
   glitch: {
-    intensity: number; // 0-100 how far/often pixels flicker to nearby cells as the cursor sweeps
-    speed: number; // 0-100 flicker rate
+    intensity: number; // 0-100 how far pixels drag in the cursor's direction as it sweeps
+    speed: number; // 0-100 motion sensitivity (how easily cursor movement charges the drag)
   };
 }
 ```

@@ -6,4 +6,4 @@
 - React wrapper
 - Interactive demo with live controls
 - Organic (rounded square), dot-matrix, and linear pixel shapes
-- Cursor-driven pixel-displacement glitch — squares flicker/jump to nearby cells along the cursor path
+- Cursor-driven liquid drag — pixels flow in the cursor's direction (dithered), keeping their square shape
