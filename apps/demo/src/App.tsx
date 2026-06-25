@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Copy, Github, Pause, Play, SlidersHorizontal } from "lucide-react";
-import {
-  createDemoLotusSource,
-  defaultSettings,
-  normalizeSettings,
-  paintDemoLotus,
-  type GlyphTrailSettings
-} from "@glyph-trail/core";
+import { normalizeSettings, type GlyphTrailSettings } from "@glyph-trail/core";
 import { GlyphTrailCanvas } from "@glyph-trail/react";
+
+const DEMO_SOURCE = "/lotus.jpg";
 
 type PresetId = "lotus" | "cyberPoster" | "softGlow" | "highNoise";
 type ActivePreset = PresetId | "custom";
@@ -45,31 +41,15 @@ const presetLabels: Record<PresetId, string> = {
   highNoise: "High Noise"
 };
 
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function App() {
   const [settings, setSettings] = useState<GlyphTrailSettings>(() => normalizeSettings());
   const [activePreset, setActivePreset] = useState<ActivePreset>("lotus");
-  const [source, setSource] = useState<HTMLCanvasElement | undefined>();
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(prefersReducedMotion);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-
-  useEffect(() => {
-    const canvas = createDemoLotusSource();
-    const context = canvas.getContext("2d");
-    let frame = 0;
-
-    setSource(canvas);
-
-    const animate = (time: number) => {
-      if (context) {
-        paintDemoLotus(context, canvas.width, canvas.height, time);
-      }
-
-      frame = requestAnimationFrame(animate);
-    };
-
-    frame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frame);
-  }, []);
 
   const snippet = useMemo(() => buildSnippet(settings), [settings]);
 
@@ -123,11 +103,11 @@ export function App() {
       <section className="stage" aria-label="Interactive Glyph Trail demo">
         <GlyphTrailCanvas
           className="glyph-canvas"
-          {...(source ? { source } : {})}
+          src={DEMO_SOURCE}
           settings={settings}
           paused={paused}
           interactive
-          aria-label="Animated lotus rendered as interactive glyph pixels"
+          aria-label="Lotus flower rendered as interactive glyph pixels"
         />
 
         <header className="topbar">
@@ -138,7 +118,7 @@ export function App() {
           <nav className="nav-links" aria-label="Project links">
             <a href="#install">Install</a>
             <a href="#api">API</a>
-            <a href="https://github.com/danhdox/glyph-trail" target="_blank" rel="noreferrer">
+            <a href="https://github.com/Andrewdddobusiness/glyph-trail" target="_blank" rel="noreferrer">
               <Github size={16} aria-hidden="true" />
               GitHub
             </a>
@@ -146,7 +126,7 @@ export function App() {
         </header>
 
         <div className="poster-copy" id="top">
-          <p className="vertical-label">WebGL2 shader effect</p>
+          <p className="vertical-label">Canvas pixel effect</p>
           <h1>LOTUS</h1>
           <p className="poster-meta">Interactive glyph dither for images and video</p>
         </div>
@@ -263,7 +243,7 @@ export function App() {
         <div className="docs-copy">
           <h2>Install in 60 seconds</h2>
           <p>
-            Drop a full-bleed WebGL canvas into a hero, portfolio, or creative coding site. Use the core renderer
+            Drop a full-bleed pixel-particle canvas into a hero, portfolio, or creative coding site. Use the core renderer
             directly or the React wrapper.
           </p>
         </div>

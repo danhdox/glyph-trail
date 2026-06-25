@@ -2,8 +2,8 @@
 
 ## 0.1.0
 
-- Initial WebGL2 renderer
+- Initial Canvas 2D pixel-particle renderer
 - React wrapper
 - Interactive demo with live controls
-- Organic, linear, and dot-matrix glyph presets
-- Cursor trail displacement and chromatic scatter
+- Organic (rounded square), dot-matrix, and linear pixel shapes
+- Pointer push-and-spring-back displacement with chromatic scatter

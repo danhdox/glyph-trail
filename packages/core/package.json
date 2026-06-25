@@ -1,8 +1,30 @@
 {
   "name": "@glyph-trail/core",
   "version": "0.1.0",
-  "description": "Framework-agnostic WebGL renderer for interactive glyph dither effects.",
+  "description": "Framework-agnostic Canvas 2D renderer for interactive pixel-particle / glyph dither effects.",
   "license": "MIT",
+  "author": "Andrewdddobusiness",
+  "homepage": "https://github.com/Andrewdddobusiness/glyph-trail#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Andrewdddobusiness/glyph-trail.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/Andrewdddobusiness/glyph-trail/issues"
+  },
+  "keywords": [
+    "canvas",
+    "pixelation",
+    "particles",
+    "dither",
+    "glyph",
+    "creative-coding",
+    "cursor",
+    "interactive",
+    "image-effect",
+    "effect"
+  ],
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",

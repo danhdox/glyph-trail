@@ -23,7 +23,7 @@ pnpm build
 
 - Keep rendering changes small enough to review.
 - Include before/after screenshots or recordings for visual changes.
-- Mention browser and device coverage for WebGL changes.
+- Mention browser and device coverage for rendering changes.
 - Avoid adding heavyweight runtime dependencies to the core package.
 
 ## Good First Areas

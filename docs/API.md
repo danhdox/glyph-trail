@@ -2,7 +2,7 @@
 
 ## `createGlyphTrail(canvas, options)`
 
-Creates a WebGL2 renderer bound to an existing canvas.
+Creates a Canvas 2D pixel-particle renderer bound to an existing canvas.
 
 ```ts
 import { createGlyphTrail } from "@glyph-trail/core";
