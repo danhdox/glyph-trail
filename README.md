@@ -16,6 +16,7 @@ Glyph Trail is a small Canvas 2D renderer plus a React wrapper that turns image 
 - Organic (rounded square), dot-matrix, and linear pixel shapes
 - Texture / mono / heat color modes
 - Chromatic scatter, shimmer, and a soft glow pass
+- Cursor-driven glitch (RGB split + jitter) that fires while you sweep, then settles
 - Reduced-motion friendly (keeps the static pixel render, drops the displacement)
 - Tiny public API with TypeScript types
 

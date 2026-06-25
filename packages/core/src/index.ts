@@ -252,7 +252,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly sampler: HTMLCanvasElement;
   private readonly samplerCtx: CanvasRenderingContext2D;
-  private readonly pointer = { x: 0, y: 0, active: false };
+  private readonly pointer = { x: 0, y: 0, active: false, speed: 0, moved: 0 };
   private readonly reducedMotion: boolean;
   private readonly resizeObserver?: ResizeObserver;
   private readonly pointerMoveHandler = (event: PointerEvent) => this.onPointerMove(event);
@@ -402,8 +402,13 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     if (rect.width <= 0 || rect.height <= 0) {
       return;
     }
-    this.pointer.x = ((event.clientX - rect.left) / rect.width) * this.canvas.width;
-    this.pointer.y = ((event.clientY - rect.top) / rect.height) * this.canvas.height;
+    const nextX = ((event.clientX - rect.left) / rect.width) * this.canvas.width;
+    const nextY = ((event.clientY - rect.top) / rect.height) * this.canvas.height;
+    if (this.pointer.active) {
+      this.pointer.moved += Math.hypot(nextX - this.pointer.x, nextY - this.pointer.y);
+    }
+    this.pointer.x = nextX;
+    this.pointer.y = nextY;
     this.pointer.active = true;
   }
 
@@ -591,27 +596,16 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const dots = settings.glyph.preset === "dot-matrix";
     const pointerActive = this.pointer.active && !this.reducedMotion && settings.trail.strength > 0;
 
-    // Glitch pass: horizontal tear bands + RGB-split bursts, refreshed a few times a second.
-    const glitch = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
-    const tickMs = mix(150, 45, clamp(settings.glitch.speed / 100, 0, 1));
-    const tick = Math.floor(time / tickMs);
-    const bands: { y0: number; y1: number; shift: number }[] = [];
-    let globalSplit = 0;
-    if (glitch > 0) {
-      if (hash(tick * 1.3, 7.7) < glitch * 0.5) {
-        globalSplit = (hash(tick, 2.2) - 0.5) * glitch * 16 * this.pixelRatio;
-      }
-      const maxBands = Math.round(1 + glitch * 5);
-      for (let i = 0; i < maxBands; i += 1) {
-        if (hash(tick + i * 13.1, 3.7) < 0.22 + glitch * 0.4) {
-          const cy = hash(tick * 1.7 + i, 5.5) * height;
-          const bandHeight = (0.012 + hash(tick + i, 8.3) * 0.06) * height;
-          const shift = (hash(tick + i, 9.9) - 0.5) * glitch * 70 * this.pixelRatio;
-          bands.push({ y0: cy - bandHeight / 2, y1: cy + bandHeight / 2, shift });
-        }
-      }
-    }
-    const bandSplit = glitch * 9 * this.pixelRatio;
+    // Track pointer speed (smoothed, decaying) so the glitch only fires while the cursor moves.
+    this.pointer.speed = this.pointer.speed * 0.6 + this.pointer.moved * 0.4;
+    this.pointer.moved = 0;
+
+    // Glitch is driven by how fast you sweep the cursor through the pixels — not an idle effect.
+    const glitchSetting = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
+    const speedRef = mix(60, 14, clamp(settings.glitch.speed / 100, 0, 1)) * this.pixelRatio;
+    const speedNorm = clamp(this.pointer.speed / speedRef, 0, 1);
+    const glitchAmount = pointerActive ? glitchSetting * speedNorm : 0;
+    const jitterSeed = Math.floor(time / 40);
 
     for (const particle of this.particles) {
       if (particle.baseAlpha <= 0.01) {
@@ -636,20 +630,22 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       particle.x += (targetX - particle.x) * ease;
       particle.y += (targetY - particle.y) * ease;
 
-      let bandShift = 0;
-      let inBand = false;
-      for (const band of bands) {
-        if (particle.homeY >= band.y0 && particle.homeY <= band.y1) {
-          bandShift += band.shift;
-          inBand = true;
-        }
+      const displaced = Math.abs(particle.x - particle.homeX) + Math.abs(particle.y - particle.homeY);
+
+      // Glitch the pixels that are currently being pushed: digital jitter + extra RGB split,
+      // scaled by cursor speed. Settles back to a clean push when the cursor stops.
+      let drawX = particle.x;
+      let drawY = particle.y;
+      let glitchSplit = 0;
+      if (glitchAmount > 0.01 && displaced > 0.6) {
+        const jitter = glitchAmount * 12 * this.pixelRatio;
+        drawX += (hash(particle.homeX * 0.21 + jitterSeed, particle.homeY * 0.13) - 0.5) * jitter;
+        drawY += (hash(particle.homeY * 0.17 + jitterSeed, particle.homeX * 0.11) - 0.5) * jitter * 0.6;
+        glitchSplit = glitchAmount * 16 * this.pixelRatio;
       }
 
-      const drawX = particle.x + bandShift;
-      const drawY = particle.y;
-      const displaced = Math.abs(particle.x - particle.homeX) + Math.abs(particle.y - particle.homeY);
       const chromaSplit = chroma > 0.2 && displaced > 0.6 ? Math.min(chroma, displaced * 0.5) : 0;
-      const split = chromaSplit + Math.abs(globalSplit) + (inBand ? bandSplit : 0);
+      const split = chromaSplit + glitchSplit;
 
       const shimmer = 0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16;
       const alpha = clamp(particle.baseAlpha * shimmer, 0, 1);
