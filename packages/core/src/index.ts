@@ -118,7 +118,7 @@ export const defaultSettings: GlyphTrailSettings = {
     spread: 56
   },
   glitch: {
-    intensity: 30,
+    intensity: 45,
     speed: 50
   }
 };
@@ -252,7 +252,8 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly sampler: HTMLCanvasElement;
   private readonly samplerCtx: CanvasRenderingContext2D;
-  private readonly pointer = { x: 0, y: 0, active: false, speed: 0, moved: 0 };
+  private readonly pointer = { x: 0, y: 0, active: false };
+  private readonly pointerTrail: { x: number; y: number; age: number; strength: number }[] = [];
   private readonly reducedMotion: boolean;
   private readonly resizeObserver?: ResizeObserver;
   private readonly pointerMoveHandler = (event: PointerEvent) => this.onPointerMove(event);
@@ -405,7 +406,15 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
     const nextX = ((event.clientX - rect.left) / rect.width) * this.canvas.width;
     const nextY = ((event.clientY - rect.top) / rect.height) * this.canvas.height;
     if (this.pointer.active) {
-      this.pointer.moved += Math.hypot(nextX - this.pointer.x, nextY - this.pointer.y);
+      const distance = Math.hypot(nextX - this.pointer.x, nextY - this.pointer.y);
+      const speedRef = mix(22, 5, clamp(this.settings.glitch.speed / 100, 0, 1)) * this.pixelRatio;
+      const strength = clamp(distance / Math.max(speedRef, 1), 0, 1);
+      if (strength > 0.02) {
+        this.pointerTrail.unshift({ x: nextX, y: nextY, age: 0, strength });
+        if (this.pointerTrail.length > 28) {
+          this.pointerTrail.length = 28;
+        }
+      }
     }
     this.pointer.x = nextX;
     this.pointer.y = nextY;
@@ -587,68 +596,71 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
 
     this.drawGlow(width, height);
 
-    const radius = mix(60, 240, clamp(settings.trail.radius / 100, 0, 1)) * this.pixelRatio;
-    const push = mix(40, 220, clamp(settings.trail.strength / 100, 0, 1)) * this.pixelRatio;
-    const ease = mix(0.16, 0.05, clamp(settings.trail.tail / 100, 0, 1));
-    const chroma = (settings.trail.chromatic / 100) * 10 * this.pixelRatio;
+    const reach = mix(40, 200, clamp(settings.trail.radius / 100, 0, 1)) * this.pixelRatio;
+    const reachSq = reach * reach;
+    const trailStrength = clamp(settings.trail.strength / 100, 0, 1);
+    const maxAge = mix(6, 34, clamp(settings.trail.tail / 100, 0, 1));
+    const splitBase = (10 + (settings.trail.chromatic / 100) * 18) * this.pixelRatio;
     const shimmerSpeed = 0.0012 + (settings.dither.speed / 100) * 0.003;
     const rounded = settings.glyph.preset === "organic";
     const dots = settings.glyph.preset === "dot-matrix";
-    const pointerActive = this.pointer.active && !this.reducedMotion && settings.trail.strength > 0;
-
-    // Track pointer speed (smoothed, decaying) so the glitch only fires while the cursor moves.
-    this.pointer.speed = this.pointer.speed * 0.6 + this.pointer.moved * 0.4;
-    this.pointer.moved = 0;
-
-    // Glitch is driven by how fast you sweep the cursor through the pixels — not an idle effect.
     const glitchSetting = this.reducedMotion ? 0 : clamp(settings.glitch.intensity / 100, 0, 1);
-    const speedRef = mix(60, 14, clamp(settings.glitch.speed / 100, 0, 1)) * this.pixelRatio;
-    const speedNorm = clamp(this.pointer.speed / speedRef, 0, 1);
-    const glitchAmount = pointerActive ? glitchSetting * speedNorm : 0;
-    const jitterSeed = Math.floor(time / 40);
+    const flickerSeed = Math.floor(time / 45);
+
+    // Age the cursor trail and drop spent points. The glitch lives only along recent movement —
+    // the pixels are NOT pushed; the cursor just deposits a fading "static" charge as it sweeps.
+    for (const point of this.pointerTrail) {
+      point.age += 1;
+    }
+    while (this.pointerTrail.length > 0) {
+      const last = this.pointerTrail[this.pointerTrail.length - 1];
+      if (!last || last.age <= maxAge) {
+        break;
+      }
+      this.pointerTrail.pop();
+    }
+
+    const glitchActive = glitchSetting > 0 && trailStrength > 0 && this.pointerTrail.length > 0;
 
     for (const particle of this.particles) {
       if (particle.baseAlpha <= 0.01) {
         continue;
       }
 
-      let targetX = particle.homeX;
-      let targetY = particle.homeY;
-
-      if (pointerActive) {
-        const dx = particle.homeX - this.pointer.x;
-        const dy = particle.homeY - this.pointer.y;
-        const distance = Math.hypot(dx, dy);
-        if (distance < radius) {
-          const force = (1 - distance / radius) ** 2;
-          const angle = Math.atan2(dy, dx);
-          targetX += Math.cos(angle) * push * force;
-          targetY += Math.sin(angle) * push * force;
+      let charge = 0;
+      if (glitchActive) {
+        for (const point of this.pointerTrail) {
+          const dx = particle.homeX - point.x;
+          const dy = particle.homeY - point.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < reachSq) {
+            const falloff = Math.exp(-distSq / (reachSq * 0.4));
+            const ageFade = 1 - point.age / maxAge;
+            const value = falloff * point.strength * ageFade;
+            if (value > charge) {
+              charge = value;
+            }
+          }
         }
+        charge = clamp(charge * glitchSetting * (0.45 + trailStrength * 1.1), 0, 1);
       }
 
-      particle.x += (targetX - particle.x) * ease;
-      particle.y += (targetY - particle.y) * ease;
+      let drawX = particle.homeX;
+      let drawY = particle.homeY;
+      let split = 0;
+      let alpha = particle.baseAlpha * (0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16);
 
-      const displaced = Math.abs(particle.x - particle.homeX) + Math.abs(particle.y - particle.homeY);
-
-      // Glitch the pixels that are currently being pushed: digital jitter + extra RGB split,
-      // scaled by cursor speed. Settles back to a clean push when the cursor stops.
-      let drawX = particle.x;
-      let drawY = particle.y;
-      let glitchSplit = 0;
-      if (glitchAmount > 0.01 && displaced > 0.6) {
-        const jitter = glitchAmount * 12 * this.pixelRatio;
-        drawX += (hash(particle.homeX * 0.21 + jitterSeed, particle.homeY * 0.13) - 0.5) * jitter;
-        drawY += (hash(particle.homeY * 0.17 + jitterSeed, particle.homeX * 0.11) - 0.5) * jitter * 0.6;
-        glitchSplit = glitchAmount * 16 * this.pixelRatio;
+      if (charge > 0.02) {
+        // In-place static: small jitter, RGB-channel split, and brightness noise. No displacement.
+        const jitter = charge * 11 * this.pixelRatio;
+        drawX += (hash(particle.homeX * 0.21 + flickerSeed, particle.homeY * 0.13) - 0.5) * jitter;
+        drawY += (hash(particle.homeY * 0.17 + flickerSeed, particle.homeX * 0.11) - 0.5) * jitter;
+        split = charge * splitBase;
+        const noise = hash(particle.homeX + flickerSeed * 2.3, particle.homeY - flickerSeed);
+        alpha *= 1 - charge * noise * 0.6;
       }
 
-      const chromaSplit = chroma > 0.2 && displaced > 0.6 ? Math.min(chroma, displaced * 0.5) : 0;
-      const split = chromaSplit + glitchSplit;
-
-      const shimmer = 0.84 + Math.sin(time * shimmerSpeed + particle.phase) * 0.16;
-      const alpha = clamp(particle.baseAlpha * shimmer, 0, 1);
+      alpha = clamp(alpha, 0, 1);
       const size = particle.size;
 
       if (split > 0.5) {
