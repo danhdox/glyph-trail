@@ -1,0 +1,27 @@
+{
+  "name": "glyph-trail-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Interactive glyph dither and cursor-displacement effects for images and video.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter glyph-trail-demo dev",
+    "build": "pnpm --filter @glyph-trail/core build && pnpm --filter @glyph-trail/react build && pnpm --filter glyph-trail-demo build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @glyph-trail/core test",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "playwright": "^1.61.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@11.1.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
