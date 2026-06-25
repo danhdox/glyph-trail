@@ -135,7 +135,22 @@ export function normalizeSettings(input: GlyphTrailSettingsInput = {}): GlyphTra
 }
 
 export function createGlyphTrail(canvas: HTMLCanvasElement, options: GlyphTrailOptions = {}): GlyphTrailInstance {
-  return new GlyphTrailRenderer(canvas, options);
+  if (typeof WebGL2RenderingContext !== "undefined") {
+    const gl = canvas.getContext("webgl2", {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+      stencil: false
+    });
+
+    if (gl) {
+      return new WebGLGlyphTrailRenderer(canvas, options, gl);
+    }
+  }
+
+  return new CanvasGlyphTrailRenderer(canvas, options);
 }
 
 export function createDemoLotusSource(width = 1200, height = 780): HTMLCanvasElement {
@@ -225,6 +240,708 @@ export function paintDemoLotus(context: CanvasRenderingContext2D, width: number,
   context.stroke();
 }
 
+const MAX_WEBGL_TRAIL_POINTS = 28;
+
+interface PointerTrailPoint {
+  x: number;
+  y: number;
+  age: number;
+  strength: number;
+  dirX: number;
+  dirY: number;
+}
+
+interface WebGLUniforms {
+  source: WebGLUniformLocation | null;
+  resolution: WebGLUniformLocation | null;
+  sourceSize: WebGLUniformLocation | null;
+  time: WebGLUniformLocation | null;
+  adjust: WebGLUniformLocation | null;
+  dither: WebGLUniformLocation | null;
+  glyph: WebGLUniformLocation | null;
+  trailSettings: WebGLUniformLocation | null;
+  glowSettings: WebGLUniformLocation | null;
+  noiseSettings: WebGLUniformLocation | null;
+  trailCount: WebGLUniformLocation | null;
+  trail: (WebGLUniformLocation | null)[];
+  trailDir: (WebGLUniformLocation | null)[];
+}
+
+const WEBGL_VERTEX_SHADER = `#version 300 es
+in vec2 aPosition;
+out vec2 vUv;
+
+void main() {
+  vUv = aPosition * 0.5 + 0.5;
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+`;
+
+const WEBGL_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+#define MAX_TRAIL 28
+
+uniform sampler2D uSource;
+uniform vec2 uResolution;
+uniform vec2 uSourceSize;
+uniform float uTime;
+uniform vec4 uAdjust;
+uniform vec4 uDither;
+uniform vec4 uGlyph;
+uniform vec4 uTrailSettings;
+uniform vec4 uGlowSettings;
+uniform vec4 uNoiseSettings;
+uniform int uTrailCount;
+uniform vec4 uTrail[MAX_TRAIL];
+uniform vec2 uTrailDir[MAX_TRAIL];
+
+in vec2 vUv;
+out vec4 outColor;
+
+float saturate(float value) {
+  return clamp(value, 0.0, 1.0);
+}
+
+vec2 saturate(vec2 value) {
+  return clamp(value, vec2(0.0), vec2(1.0));
+}
+
+vec3 saturate(vec3 value) {
+  return clamp(value, vec3(0.0), vec3(1.0));
+}
+
+float luminance(vec3 color) {
+  return dot(color, vec3(0.299, 0.587, 0.114));
+}
+
+float hash21(vec2 point) {
+  return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 point) {
+  vec2 base = floor(point);
+  vec2 local = fract(point);
+  vec2 fade = local * local * (3.0 - 2.0 * local);
+  float a = hash21(base);
+  float b = hash21(base + vec2(1.0, 0.0));
+  float c = hash21(base + vec2(0.0, 1.0));
+  float d = hash21(base + vec2(1.0, 1.0));
+  return mix(mix(a, b, fade.x), mix(c, d, fade.x), fade.y);
+}
+
+mat2 rotate2d(float angle) {
+  float s = sin(angle);
+  float c = cos(angle);
+  return mat2(c, -s, s, c);
+}
+
+vec2 coverUv(vec2 uv) {
+  float sourceAspect = uSourceSize.x / max(uSourceSize.y, 1.0);
+  float targetAspect = uResolution.x / max(uResolution.y, 1.0);
+  vec2 mapped = uv;
+
+  if (sourceAspect > targetAspect) {
+    float scale = targetAspect / sourceAspect;
+    mapped.x = (uv.x - 0.5) * scale + 0.5;
+  } else {
+    float scale = sourceAspect / targetAspect;
+    mapped.y = (uv.y - 0.5) * scale + 0.5;
+  }
+
+  return mapped;
+}
+
+vec4 readSource(vec2 uv) {
+  vec2 mapped = coverUv(uv);
+  if (mapped.x < 0.0 || mapped.y < 0.0 || mapped.x > 1.0 || mapped.y > 1.0) {
+    return vec4(0.0);
+  }
+
+  return texture(uSource, mapped);
+}
+
+float sourceMask(vec4 sampleColor) {
+  float luma = luminance(sampleColor.rgb);
+  float blackKey = smoothstep(0.018, 0.15, max(max(sampleColor.r, sampleColor.g), sampleColor.b));
+  float petalKey = smoothstep(0.05, 0.32, sampleColor.r - sampleColor.g * 0.42);
+  float warmKey = smoothstep(0.08, 0.28, sampleColor.r - sampleColor.b * 0.3);
+  float flowerKey = max(petalKey, warmKey * 0.78);
+  return sampleColor.a < 0.99 ? sampleColor.a : blackKey * flowerKey * smoothstep(0.035, 0.14, luma);
+}
+
+vec3 adjustColor(vec3 color) {
+  float gray = luminance(color);
+  float saturation = uAdjust.x / 100.0;
+  color = vec3(gray) + (color - vec3(gray)) * saturation;
+  float temperature = uAdjust.y / 100.0;
+  color.r += temperature * 0.12;
+  color.b -= temperature * 0.12;
+  float contrast = 1.0 + uAdjust.z / 100.0;
+  color = (color - 0.5) * contrast + 0.5;
+  return saturate(color);
+}
+
+vec3 gradeColor(vec3 sourceColor, vec2 uv, float luma, float mask) {
+  vec3 adjusted = adjustColor(sourceColor);
+  float core = exp(-((uv.x - 0.51) * (uv.x - 0.51) / 0.012 + (uv.y - 0.51) * (uv.y - 0.51) / 0.028));
+  float coreHeat = core * smoothstep(0.18, 0.85, luma + mask * 0.22);
+  float petalNoise = noise(uv * vec2(9.0, 5.0) + uTime * 0.05);
+  vec3 petal = mix(vec3(1.0, 0.18, 0.58), vec3(0.98, 0.08, 0.82), petalNoise);
+  vec3 warm = mix(vec3(1.0, 0.48, 0.06), vec3(1.0, 0.9, 0.22), smoothstep(0.35, 1.0, luma + core * 0.35));
+  vec3 heat = mix(petal * (0.68 + luma * 0.92), warm, coreHeat);
+
+  if (uGlyph.w > 1.5) {
+    float mono = saturate(0.42 + luma * 1.1);
+    return vec3(0.95, 0.92, 0.86) * mono;
+  }
+
+  if (uGlyph.w > 0.5) {
+    return heat;
+  }
+
+  return mix(adjusted, heat, 0.96);
+}
+
+vec2 velocityDisplace(vec2 uv) {
+  if (uTrailCount <= 0) {
+    return vec2(0.0);
+  }
+
+  vec2 pixel = uv * uResolution;
+  float radius = mix(72.0, 148.0, saturate(uTrailSettings.x / 100.0));
+  float force = mix(0.38, 0.95, saturate(uTrailSettings.y / 100.0));
+  float fluidity = saturate(uTrailSettings.w / 100.0);
+  float glitch = saturate(uGlowSettings.z / 100.0);
+  float chromatic = saturate(uGlowSettings.w / 100.0);
+  float noiseScale = mix(1.8, 5.4, saturate(uNoiseSettings.x / 100.0));
+  vec2 displacement = vec2(0.0);
+
+  for (int index = 0; index < MAX_TRAIL; index += 1) {
+    if (index >= uTrailCount) {
+      break;
+    }
+
+    vec4 point = uTrail[index];
+    vec2 pointPixel = point.xy * uResolution;
+    vec2 delta = pixel - pointPixel;
+    float distSq = dot(delta, delta);
+    float falloff = exp(-distSq / max(radius * radius * 0.42, 1.0));
+    float curl = (noise(uv * noiseScale + vec2(float(index) * 7.31, uTime * 0.55)) - 0.5) * 1.25 * fluidity;
+    vec2 dir = rotate2d(curl) * normalize(uTrailDir[index] + vec2(0.0001));
+    displacement += dir * falloff * point.z * point.w * force * mix(6.0, 18.0, glitch) * (1.0 + chromatic * 0.18);
+  }
+
+  return displacement / uResolution;
+}
+
+vec3 emissiveSample(vec2 uv) {
+  vec2 displaced = uv + velocityDisplace(uv) * 0.42;
+  vec4 sampleColor = readSource(displaced);
+  float mask = sourceMask(sampleColor);
+  if (mask <= 0.001) {
+    return vec3(0.0);
+  }
+
+  float luma = luminance(sampleColor.rgb);
+  vec3 color = gradeColor(sampleColor.rgb, uv, luma, mask);
+  float core = exp(-((uv.x - 0.51) * (uv.x - 0.51) / 0.012 + (uv.y - 0.51) * (uv.y - 0.51) / 0.028));
+  float emission = smoothstep(0.05, 0.82, max(luma, mask * 0.62)) * mask * (1.08 + core * 2.2);
+  return color * emission * 1.08;
+}
+
+vec3 bloomPass(vec2 uv) {
+  float spread = saturate(uGlowSettings.y / 100.0);
+  float base = mix(8.0, 48.0, spread);
+  vec2 px = 1.0 / uResolution;
+  vec3 bloom = emissiveSample(uv) * 0.3;
+
+  bloom += emissiveSample(uv + vec2(base, 0.0) * px) * 0.13;
+  bloom += emissiveSample(uv - vec2(base, 0.0) * px) * 0.13;
+  bloom += emissiveSample(uv + vec2(0.0, base) * px) * 0.11;
+  bloom += emissiveSample(uv - vec2(0.0, base) * px) * 0.11;
+  bloom += emissiveSample(uv + vec2(base * 2.3, base * 0.5) * px) * 0.08;
+  bloom += emissiveSample(uv - vec2(base * 2.3, base * 0.5) * px) * 0.08;
+  return bloom;
+}
+
+vec3 rayPass(vec2 uv) {
+  float intensity = saturate(uGlowSettings.x / 100.0);
+  if (intensity <= 0.001) {
+    return vec3(0.0);
+  }
+
+  float lengthPx = mix(150.0, 350.0, saturate(uGlowSettings.y / 100.0));
+  vec3 rays = vec3(0.0);
+  float total = 0.0;
+
+  for (int index = 1; index <= 20; index += 1) {
+    float t = float(index) / 20.0;
+    float jitter = (noise(vec2(uv.y * 120.0, float(index) * 3.7 + uTime * 0.25)) - 0.5) * mix(0.3, 0.9, intensity);
+    vec2 rayUv = uv + vec2(t * lengthPx / uResolution.x, jitter / uResolution.y);
+    if (rayUv.x > 1.0) {
+      continue;
+    }
+
+    vec3 emission = emissiveSample(rayUv);
+    float energy = luminance(emission);
+    float decay = pow(mix(0.92, 0.96, intensity), float(index));
+    float weight = smoothstep(0.06, 0.9, energy) * decay;
+    rays += emission * weight;
+    total += weight;
+  }
+
+  if (total > 0.0) {
+    rays /= 6.0;
+  }
+
+  return rays * intensity * 0.76;
+}
+
+vec4 halftonePass(vec2 uv) {
+  float preset = uGlyph.w;
+  float angle = preset > 1.5 ? 0.0 : (preset > 0.5 ? -0.055 : 0.095);
+  mat2 rotation = rotate2d(angle);
+  mat2 inverseRotation = rotate2d(-angle);
+  vec2 center = uResolution * 0.5;
+  float cell = mix(8.0, 2.7, saturate(uGlyph.x / 120.0));
+  vec2 rotatedPixel = rotation * (uv * uResolution - center) + center;
+  vec2 grid = rotatedPixel / cell;
+  vec2 cellId = floor(grid);
+  float ditherMix = saturate(uDither.y / 100.0);
+  vec2 jitter = (vec2(hash21(cellId + 13.1), hash21(cellId + 71.7)) - 0.5) * mix(0.12, 0.25, ditherMix);
+  vec2 local = fract(grid) - 0.5 - jitter;
+  vec2 cellPixel = inverseRotation * (((cellId + 0.5 + jitter) * cell) - center) + center;
+  vec2 cellUv = cellPixel / uResolution;
+  vec2 displacementUv = velocityDisplace(cellUv);
+  local -= (rotation * (displacementUv * uResolution)) / cell * 0.68;
+  vec2 displacedUv = cellUv + displacementUv * 0.62;
+  vec4 sampleColor = readSource(displacedUv);
+  float mask = sourceMask(sampleColor);
+  float sourceLuma = luminance(sampleColor.rgb);
+  float density = pow(saturate(max(sourceLuma * 1.22, mask * 0.72)), mix(1.35, 0.52, saturate(uGlyph.y / 100.0)));
+  float animatedNoise = (hash21(cellId * 1.83 + floor(uTime * mix(0.25, 2.2, saturate(uDither.z / 100.0)))) - 0.5) * 0.08 * ditherMix;
+  float threshold = mix(0.18, 0.48, saturate(uDither.x / 100.0));
+  float feather = mix(0.035, 0.085, ditherMix);
+  float alphaGate = smoothstep(threshold - feather, threshold + feather, density + animatedNoise);
+
+  if (mask <= 0.001 || alphaGate <= 0.001) {
+    return vec4(0.0);
+  }
+
+  float dist = length(local * cell);
+  float radius = cell * mix(0.14, 0.62, sqrt(saturate(density))) * mix(0.72, 1.08, saturate(uGlyph.z / 100.0));
+  float shape = 1.0 - smoothstep(radius - 0.55, radius + 0.55, dist);
+
+  if (preset > 0.5 && preset < 1.5) {
+    float stripe = 1.0 - smoothstep(radius * 0.38, radius * 0.38 + 0.55, abs(local.y * cell));
+    shape = max(shape * 0.62, stripe * smoothstep(radius * 1.9, radius * 0.35, abs(local.x * cell)));
+  }
+
+  float shimmer = 0.92 + sin(uTime * mix(0.7, 2.6, saturate(uDither.z / 100.0)) + hash21(cellId) * 6.2831853) * 0.08;
+  vec3 color = gradeColor(sampleColor.rgb, cellUv, sourceLuma, mask);
+  float core = exp(-((cellUv.x - 0.51) * (cellUv.x - 0.51) / 0.012 + (cellUv.y - 0.51) * (cellUv.y - 0.51) / 0.028));
+  color *= 1.22 + core * 1.35;
+  float alpha = saturate(shape * alphaGate * mask * saturate(uGlyph.z / 100.0) * shimmer * 1.08);
+  return vec4(color * alpha, alpha);
+}
+
+void main() {
+  vec2 uv = saturate(vUv);
+  vec4 halftone = halftonePass(uv);
+  float glow = saturate(uGlowSettings.x / 100.0);
+  vec3 bloom = bloomPass(uv) * glow * 0.44;
+  vec3 rays = rayPass(uv);
+  float vignette = smoothstep(0.98, 0.28, length((uv - 0.5) * vec2(1.06, 1.0)));
+  vec3 color = halftone.rgb + bloom + rays;
+  color *= 0.86 + vignette * 0.18;
+  color = color / (vec3(1.0) + color * 0.55);
+  color *= 1.08;
+  color = pow(max(color, vec3(0.0)), vec3(0.92));
+  outColor = vec4(color, 1.0);
+}
+`;
+
+class WebGLGlyphTrailRenderer implements GlyphTrailInstance {
+  readonly canvas: HTMLCanvasElement;
+
+  private readonly gl: WebGL2RenderingContext;
+  private readonly program: WebGLProgram;
+  private readonly positionBuffer: WebGLBuffer;
+  private readonly sourceTexture: WebGLTexture;
+  private readonly uniforms: WebGLUniforms;
+  private readonly pointer = { x: 0, y: 0, active: false };
+  private readonly pointerTrail: PointerTrailPoint[] = [];
+  private readonly reducedMotion: boolean;
+  private readonly resizeObserver?: ResizeObserver;
+  private readonly pointerMoveHandler = (event: PointerEvent) => this.onPointerMove(event);
+  private readonly pointerLeaveHandler = () => {
+    this.pointer.active = false;
+  };
+
+  private settings: GlyphTrailSettings;
+  private source?: GlyphTrailElementSource;
+  private sourceToken = 0;
+  private sourceIsDynamic = false;
+  private animationFrame = 0;
+  private paused = false;
+  private destroyed = false;
+  private pixelRatio: number;
+  private interactive: boolean;
+  private sourceWidth = 1;
+  private sourceHeight = 1;
+  private needsTextureUpload = false;
+
+  constructor(canvas: HTMLCanvasElement, options: GlyphTrailOptions, gl: WebGL2RenderingContext) {
+    this.canvas = canvas;
+    this.gl = gl;
+    this.settings = normalizeSettings(options.settings);
+    this.pixelRatio = options.pixelRatio ?? getWebGLPixelRatio();
+    this.paused = options.paused ?? false;
+    this.interactive = options.interactive ?? true;
+    this.reducedMotion =
+      typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const program = createWebGLProgram(gl, WEBGL_VERTEX_SHADER, WEBGL_FRAGMENT_SHADER);
+    const positionBuffer = gl.createBuffer();
+    const sourceTexture = gl.createTexture();
+    if (!positionBuffer || !sourceTexture) {
+      throw new Error("Glyph Trail could not allocate WebGL resources.");
+    }
+
+    this.program = program;
+    this.positionBuffer = positionBuffer;
+    this.sourceTexture = sourceTexture;
+    this.uniforms = getWebGLUniforms(gl, program);
+
+    this.setupGeometry();
+    this.setupTexture();
+
+    if (this.interactive) {
+      canvas.addEventListener("pointermove", this.pointerMoveHandler, { passive: true });
+      canvas.addEventListener("pointerdown", this.pointerMoveHandler, { passive: true });
+      canvas.addEventListener("pointerenter", this.pointerMoveHandler, { passive: true });
+      canvas.addEventListener("pointerleave", this.pointerLeaveHandler, { passive: true });
+    }
+
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.rebuild());
+      this.resizeObserver.observe(canvas);
+    }
+
+    this.rebuild();
+    this.updateSource(options.source ?? options.src ?? createFallbackTextureSource());
+
+    if (this.paused) {
+      this.renderStaticFrame();
+    } else if (options.autoplay ?? true) {
+      this.play();
+    }
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    cancelAnimationFrame(this.animationFrame);
+    this.resizeObserver?.disconnect();
+    this.canvas.removeEventListener("pointermove", this.pointerMoveHandler);
+    this.canvas.removeEventListener("pointerdown", this.pointerMoveHandler);
+    this.canvas.removeEventListener("pointerenter", this.pointerMoveHandler);
+    this.canvas.removeEventListener("pointerleave", this.pointerLeaveHandler);
+    this.gl.deleteBuffer(this.positionBuffer);
+    this.gl.deleteTexture(this.sourceTexture);
+    this.gl.deleteProgram(this.program);
+  }
+
+  resize(): void {
+    this.rebuild();
+  }
+
+  pause(): void {
+    this.paused = true;
+    cancelAnimationFrame(this.animationFrame);
+  }
+
+  play(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.paused = false;
+    cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = requestAnimationFrame((time) => this.render(time));
+  }
+
+  update(options: Partial<GlyphTrailOptions>): void {
+    if (options.settings) {
+      this.settings = normalizeSettings({
+        adjust: { ...this.settings.adjust, ...options.settings.adjust },
+        dither: { ...this.settings.dither, ...options.settings.dither },
+        glyph: { ...this.settings.glyph, ...options.settings.glyph },
+        trail: { ...this.settings.trail, ...options.settings.trail },
+        glow: { ...this.settings.glow, ...options.settings.glow },
+        glitch: { ...this.settings.glitch, ...options.settings.glitch }
+      });
+      this.renderStaticFrame();
+    }
+
+    if (options.pixelRatio !== undefined) {
+      this.pixelRatio = options.pixelRatio;
+      this.rebuild();
+    }
+
+    const nextSource = options.source ?? options.src;
+    if (nextSource) {
+      this.updateSource(nextSource);
+    }
+
+    if (options.paused === true) {
+      this.pause();
+      this.renderStaticFrame();
+    } else if (options.paused === false) {
+      this.play();
+    }
+  }
+
+  private setupGeometry(): void {
+    const gl = this.gl;
+    const positionLocation = gl.getAttribLocation(this.program, "aPosition");
+    gl.useProgram(this.program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+      gl.STATIC_DRAW
+    );
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  private setupTexture(): void {
+    const gl = this.gl;
+    gl.useProgram(this.program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    setUniform1i(gl, this.uniforms.source, 0);
+  }
+
+  private updateSource(input: GlyphTrailSource): void {
+    const token = ++this.sourceToken;
+
+    if (typeof input !== "string") {
+      this.source = input;
+      this.sourceIsDynamic = isDynamicSource(input);
+      this.sourceWidth = getMediaWidth(input);
+      this.sourceHeight = getMediaHeight(input);
+      this.needsTextureUpload = true;
+      this.rebuild();
+      return;
+    }
+
+    void loadSource(input).then((source) => {
+      if (this.destroyed || token !== this.sourceToken) {
+        return;
+      }
+      this.source = source;
+      this.sourceIsDynamic = isDynamicSource(source);
+      this.sourceWidth = getMediaWidth(source);
+      this.sourceHeight = getMediaHeight(source);
+      this.needsTextureUpload = true;
+      this.rebuild();
+    });
+  }
+
+  private onPointerMove(event: PointerEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const nextX = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    const nextY = 1 - clamp((event.clientY - rect.top) / rect.height, 0, 1);
+    if (this.pointer.active) {
+      const dx = (nextX - this.pointer.x) * this.canvas.width;
+      const dy = (nextY - this.pointer.y) * this.canvas.height;
+      const distance = Math.hypot(dx, dy);
+      const speedRef = mix(18, 5, clamp(this.settings.glitch.speed / 100, 0, 1)) * this.pixelRatio;
+      const strength = clamp(distance / Math.max(speedRef, 1), 0, 1);
+      if (strength > 0.015) {
+        const inv = 1 / Math.max(distance, 1);
+        this.pointerTrail.unshift({ x: nextX, y: nextY, age: 0, strength, dirX: dx * inv, dirY: dy * inv });
+        if (this.pointerTrail.length > MAX_WEBGL_TRAIL_POINTS) {
+          this.pointerTrail.length = MAX_WEBGL_TRAIL_POINTS;
+        }
+      }
+    }
+
+    this.pointer.x = nextX;
+    this.pointer.y = nextY;
+    this.pointer.active = true;
+  }
+
+  private rebuild(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    const cssWidth = this.canvas.clientWidth || this.canvas.width || 1;
+    const cssHeight = this.canvas.clientHeight || this.canvas.height || 1;
+    const width = Math.max(1, Math.floor(cssWidth * this.pixelRatio));
+    const height = Math.max(1, Math.floor(cssHeight * this.pixelRatio));
+
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas.width = width;
+      this.canvas.height = height;
+    }
+
+    this.gl.viewport(0, 0, width, height);
+    this.uploadTextureIfNeeded();
+
+    if (this.paused) {
+      this.renderStaticFrame();
+    }
+  }
+
+  private uploadTextureIfNeeded(): void {
+    const source = this.source;
+    if (!source || !isSourceReady(source) || (!this.needsTextureUpload && !this.sourceIsDynamic)) {
+      return;
+    }
+
+    const gl = this.gl;
+    try {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      this.sourceWidth = getMediaWidth(source);
+      this.sourceHeight = getMediaHeight(source);
+      this.needsTextureUpload = false;
+    } catch {
+      // Cross-origin media without CORS headers cannot be sampled. Keep the previous texture.
+    }
+  }
+
+  private renderStaticFrame(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.draw(0);
+  }
+
+  private render(time: number): void {
+    if (this.destroyed || this.paused) {
+      return;
+    }
+
+    this.draw(time);
+    this.animationFrame = requestAnimationFrame((next) => this.render(next));
+  }
+
+  private draw(time: number): void {
+    const gl = this.gl;
+    const settings = this.settings;
+    this.uploadTextureIfNeeded();
+    this.ageTrail();
+
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.useProgram(this.program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
+    gl.clearColor(0.005, 0.005, 0.008, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    setUniform2f(gl, this.uniforms.resolution, this.canvas.width, this.canvas.height);
+    setUniform2f(gl, this.uniforms.sourceSize, this.sourceWidth, this.sourceHeight);
+    setUniform1f(gl, this.uniforms.time, this.reducedMotion ? 0 : time * 0.001);
+    setUniform4f(
+      gl,
+      this.uniforms.adjust,
+      settings.adjust.saturation,
+      settings.adjust.temperature,
+      settings.adjust.contrast,
+      0
+    );
+    setUniform4f(
+      gl,
+      this.uniforms.dither,
+      settings.dither.threshold,
+      settings.dither.mix,
+      settings.dither.speed,
+      0
+    );
+    setUniform4f(
+      gl,
+      this.uniforms.glyph,
+      settings.glyph.scale,
+      settings.glyph.gamma,
+      settings.glyph.mix,
+      glyphPresetToNumber(settings.glyph.preset, settings.glyph.colorMode)
+    );
+    setUniform4f(
+      gl,
+      this.uniforms.trailSettings,
+      settings.trail.radius,
+      settings.trail.strength,
+      settings.trail.tail,
+      settings.trail.fluidity
+    );
+    setUniform4f(
+      gl,
+      this.uniforms.glowSettings,
+      settings.glow.intensity,
+      settings.glow.spread,
+      this.reducedMotion ? 0 : settings.glitch.intensity,
+      settings.trail.chromatic
+    );
+    setUniform4f(gl, this.uniforms.noiseSettings, settings.trail.noiseScale, settings.trail.momentum, 0, 0);
+    this.uploadTrailUniforms();
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  private ageTrail(): void {
+    const maxAge = mix(8, 42, clamp(this.settings.trail.tail / 100, 0, 1));
+    for (const point of this.pointerTrail) {
+      point.age += 1;
+    }
+
+    while (this.pointerTrail.length > 0) {
+      const last = this.pointerTrail[this.pointerTrail.length - 1];
+      if (!last || last.age <= maxAge) {
+        break;
+      }
+      this.pointerTrail.pop();
+    }
+  }
+
+  private uploadTrailUniforms(): void {
+    const gl = this.gl;
+    const maxAge = mix(8, 42, clamp(this.settings.trail.tail / 100, 0, 1));
+    const count = Math.min(this.pointerTrail.length, MAX_WEBGL_TRAIL_POINTS);
+    setUniform1i(gl, this.uniforms.trailCount, count);
+
+    for (let index = 0; index < MAX_WEBGL_TRAIL_POINTS; index += 1) {
+      const point = this.pointerTrail[index];
+      const trailLocation = this.uniforms.trail[index] ?? null;
+      const dirLocation = this.uniforms.trailDir[index] ?? null;
+
+      if (index < count && point) {
+        const ageFade = clamp(1 - point.age / Math.max(maxAge, 1), 0, 1);
+        setUniform4f(gl, trailLocation, point.x, point.y, point.strength, ageFade);
+        setUniform2f(gl, dirLocation, point.dirX, point.dirY);
+      } else {
+        setUniform4f(gl, trailLocation, 0, 0, 0, 0);
+        setUniform2f(gl, dirLocation, 0, 0);
+      }
+    }
+  }
+}
+
 interface Particle {
   homeX: number;
   homeY: number;
@@ -244,7 +961,7 @@ interface Particle {
  * pulls nearby dots through a short-lived displacement trail while the base image
  * keeps its soft photographic color and glow.
  */
-class GlyphTrailRenderer implements GlyphTrailInstance {
+class CanvasGlyphTrailRenderer implements GlyphTrailInstance {
   readonly canvas: HTMLCanvasElement;
 
   private readonly ctx: CanvasRenderingContext2D;
@@ -317,6 +1034,7 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
       this.resizeObserver.observe(canvas);
     }
 
+    this.rebuild();
     this.updateSource(options.source ?? options.src ?? createFallbackTextureSource());
 
     if (this.paused) {
@@ -773,6 +1491,124 @@ class GlyphTrailRenderer implements GlyphTrailInstance {
   }
 }
 
+function createWebGLProgram(gl: WebGL2RenderingContext, vertexSource: string, fragmentSource: string): WebGLProgram {
+  const vertexShader = compileWebGLShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileWebGLShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const program = gl.createProgram();
+  if (!program) {
+    throw new Error("Glyph Trail could not create a WebGL program.");
+  }
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+
+  const linked = gl.getProgramParameter(program, gl.LINK_STATUS) as boolean;
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (!linked) {
+    const message = gl.getProgramInfoLog(program) || "Unknown WebGL program link error.";
+    gl.deleteProgram(program);
+    throw new Error(`Glyph Trail WebGL program failed to link: ${message}`);
+  }
+
+  return program;
+}
+
+function compileWebGLShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+  const shader = gl.createShader(type);
+  if (!shader) {
+    throw new Error("Glyph Trail could not create a WebGL shader.");
+  }
+
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  const compiled = gl.getShaderParameter(shader, gl.COMPILE_STATUS) as boolean;
+  if (!compiled) {
+    const message = gl.getShaderInfoLog(shader) || "Unknown WebGL shader compile error.";
+    gl.deleteShader(shader);
+    throw new Error(`Glyph Trail WebGL shader failed to compile: ${message}`);
+  }
+
+  return shader;
+}
+
+function getWebGLUniforms(gl: WebGL2RenderingContext, program: WebGLProgram): WebGLUniforms {
+  return {
+    source: gl.getUniformLocation(program, "uSource"),
+    resolution: gl.getUniformLocation(program, "uResolution"),
+    sourceSize: gl.getUniformLocation(program, "uSourceSize"),
+    time: gl.getUniformLocation(program, "uTime"),
+    adjust: gl.getUniformLocation(program, "uAdjust"),
+    dither: gl.getUniformLocation(program, "uDither"),
+    glyph: gl.getUniformLocation(program, "uGlyph"),
+    trailSettings: gl.getUniformLocation(program, "uTrailSettings"),
+    glowSettings: gl.getUniformLocation(program, "uGlowSettings"),
+    noiseSettings: gl.getUniformLocation(program, "uNoiseSettings"),
+    trailCount: gl.getUniformLocation(program, "uTrailCount"),
+    trail: Array.from({ length: MAX_WEBGL_TRAIL_POINTS }, (_, index) =>
+      gl.getUniformLocation(program, `uTrail[${index}]`)
+    ),
+    trailDir: Array.from({ length: MAX_WEBGL_TRAIL_POINTS }, (_, index) =>
+      gl.getUniformLocation(program, `uTrailDir[${index}]`)
+    )
+  };
+}
+
+function setUniform1f(gl: WebGL2RenderingContext, location: WebGLUniformLocation | null, x: number): void {
+  if (location) {
+    gl.uniform1f(location, x);
+  }
+}
+
+function setUniform1i(gl: WebGL2RenderingContext, location: WebGLUniformLocation | null, x: number): void {
+  if (location) {
+    gl.uniform1i(location, x);
+  }
+}
+
+function setUniform2f(
+  gl: WebGL2RenderingContext,
+  location: WebGLUniformLocation | null,
+  x: number,
+  y: number
+): void {
+  if (location) {
+    gl.uniform2f(location, x, y);
+  }
+}
+
+function setUniform4f(
+  gl: WebGL2RenderingContext,
+  location: WebGLUniformLocation | null,
+  x: number,
+  y: number,
+  z: number,
+  w: number
+): void {
+  if (location) {
+    gl.uniform4f(location, x, y, z, w);
+  }
+}
+
+function glyphPresetToNumber(preset: GlyphSettings["preset"], colorMode: GlyphSettings["colorMode"]): number {
+  if (colorMode === "mono") {
+    return 2;
+  }
+
+  if (colorMode === "heat" || preset === "linear") {
+    return 1;
+  }
+
+  if (preset === "dot-matrix") {
+    return 2;
+  }
+
+  return 0;
+}
+
 function fillCell(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -892,12 +1728,24 @@ function getMediaHeight(source: GlyphTrailElementSource): number {
   return ("height" in source && typeof source.height === "number" ? source.height : 1) || 1;
 }
 
+function isDynamicSource(source: GlyphTrailElementSource): boolean {
+  if (source instanceof HTMLVideoElement || source instanceof HTMLCanvasElement) {
+    return true;
+  }
+
+  return typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas;
+}
+
 function createFallbackTextureSource(): HTMLCanvasElement {
   return createDemoLotusSource(1200, 780);
 }
 
 function getDevicePixelRatio(): number {
   return typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+}
+
+function getWebGLPixelRatio(): number {
+  return typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio || 1, 1.35);
 }
 
 function mix(a: number, b: number, t: number): number {
@@ -929,12 +1777,14 @@ async function loadSource(src: string): Promise<HTMLImageElement | HTMLVideoElem
     video.muted = true;
     video.loop = true;
     video.playsInline = true;
-    video.src = src;
-
-    await new Promise<void>((resolve, reject) => {
+    const ready = new Promise<void>((resolve, reject) => {
       video.addEventListener("loadeddata", () => resolve(), { once: true });
       video.addEventListener("error", () => reject(new Error(`Could not load video source: ${src}`)), { once: true });
     });
+    video.src = src;
+    video.load();
+
+    await ready;
 
     await video.play().catch(() => undefined);
     return video;
@@ -942,12 +1792,13 @@ async function loadSource(src: string): Promise<HTMLImageElement | HTMLVideoElem
 
   const image = new Image();
   image.crossOrigin = "anonymous";
-  image.src = src;
-
-  await new Promise<void>((resolve, reject) => {
+  const ready = new Promise<void>((resolve, reject) => {
     image.addEventListener("load", () => resolve(), { once: true });
     image.addEventListener("error", () => reject(new Error(`Could not load image source: ${src}`)), { once: true });
   });
+  image.src = src;
+
+  await ready;
 
   return image;
 }

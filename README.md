@@ -2,20 +2,20 @@
 
 Interactive glyph dither and cursor-displacement effects for images and video.
 
-Glyph Trail is a small Canvas 2D renderer plus a React wrapper that turns image or video sources into interactive pixel-particle artwork. Each cell of the image becomes a square "pixel"; sweeping the cursor drags the pixels along its path slightly in the direction you move — a subtle liquid, dithered flow that keeps each pixel's square shape, then eases back. It is designed for creative hero sections, portfolio pieces, editorial pages, and pixel/dither-art experiments.
+Glyph Trail is a WebGL shader renderer plus a React wrapper that turns image or video sources into interactive halftone/glyph artwork. The default renderer samples the source through a cursor-driven velocity field, applies a dense dot lattice, warm/pink color grading, leftward light trails, and bloom; browsers without WebGL2 fall back to a Canvas 2D particle renderer.
 
 ![Glyph Trail preview](docs/preview.png)
 
 ## Features
 
-- Framework-agnostic Canvas 2D core — no WebGL required
+- Framework-agnostic WebGL2 core with Canvas 2D fallback
 - React component wrapper
 - Image, video, canvas, and image-bitmap sources
-- Cursor sweep drags pixels in the direction you move — a subtle liquid dither flow that eases back
+- Cursor sweep distorts the source UVs for a liquid dither smear
 - Dark-cutoff dithering isolates the subject and scatters the edges
 - Organic (rounded square), dot-matrix, and linear pixel shapes
 - Texture / mono / heat color modes
-- Shimmer and a soft glow pass
+- Warm center grading, leftward horizontal rays, shimmer, and bloom
 - Honors reduced motion (keeps the static pixel render, drops the glitch)
 - Tiny public API with TypeScript types
 
@@ -24,7 +24,7 @@ Glyph Trail is a small Canvas 2D renderer plus a React wrapper that turns image 
 The packages are ready for npm publishing. Until the first npm release, clone the repo and run the demo locally:
 
 ```bash
-git clone https://github.com/Andrewdddobusiness/glyph-trail.git
+git clone https://github.com/danhdox/glyph-trail.git
 cd glyph-trail
 pnpm install
 pnpm dev
@@ -48,10 +48,10 @@ export function Hero() {
       interactive
       settings={{
         adjust: { saturation: 198, temperature: -3, contrast: 100 },
-        dither: { threshold: 50, mix: 50, speed: 50 },
+        dither: { threshold: 30, mix: 38, speed: 42 },
         glyph: {
           preset: "organic",
-          scale: 84,
+          scale: 92,
           gamma: 100,
           phase: 100,
           mix: 100,
@@ -69,8 +69,8 @@ export function Hero() {
           momentum: 0,
           noiseScale: 86
         },
-        glow: { intensity: 20, spread: 56 },
-        glitch: { intensity: 30, speed: 50 }
+        glow: { intensity: 34, spread: 62 },
+        glitch: { intensity: 38, speed: 42 }
       }}
     />
   );
@@ -110,14 +110,14 @@ types, the complete settings object, and the React component props and ref.
 
 ## Browser Support
 
-Glyph Trail uses the Canvas 2D API, so it works in every current browser (Chromium, Firefox, Safari) with no WebGL requirement. If the 2D context is unavailable, `createGlyphTrail` throws — wrap construction in a `try/catch` (the React wrapper exposes an `onError` prop) and fall back to a static image or video. Rounded pixels use `CanvasRenderingContext2D.roundRect` where available and fall back to square pixels otherwise.
+Glyph Trail uses WebGL2 by default for shader-quality displacement, halftone, rays, and bloom. If WebGL2 is unavailable, `createGlyphTrail` automatically falls back to the Canvas 2D renderer. If neither context is available, construction throws — wrap construction in a `try/catch` (the React wrapper exposes an `onError` prop) and fall back to a static image or video.
 
 ## Performance
 
-- Cost scales with the number of visible pixels, which is set by `glyph.scale` (cell size) and the dark cutoff. Larger cells = fewer particles = cheaper.
-- Dark/transparent cells are dropped, so an isolated subject on a dark background is much cheaper than a full-frame image.
+- WebGL cost is mostly shader fill-rate. Large fullscreen canvases with high bloom/ray intensity are more expensive than compact hero crops.
+- In Canvas fallback mode, cost scales with the number of visible particles, which is set by `glyph.scale` and the dark cutoff.
 - Device pixel ratio is capped at 2 by default to avoid oversampling on high-DPI displays. Pass `pixelRatio` to override.
-- Static image/canvas sources are sampled once (and on resize); video sources are re-sampled each frame.
+- Static image sources upload once; video and canvas sources update the WebGL texture each frame.
 - Use `pause()` / `paused` when the canvas is offscreen to stop the animation loop.
 
 ## Accessibility

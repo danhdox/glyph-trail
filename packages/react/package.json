@@ -3,15 +3,15 @@
   "version": "0.1.0",
   "description": "React component wrapper for Glyph Trail.",
   "license": "MIT",
-  "author": "Andrewdddobusiness",
-  "homepage": "https://github.com/Andrewdddobusiness/glyph-trail#readme",
+  "author": "danhdox",
+  "homepage": "https://github.com/danhdox/glyph-trail#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Andrewdddobusiness/glyph-trail.git",
+    "url": "git+https://github.com/danhdox/glyph-trail.git",
     "directory": "packages/react"
   },
   "bugs": {
-    "url": "https://github.com/Andrewdddobusiness/glyph-trail/issues"
+    "url": "https://github.com/danhdox/glyph-trail/issues"
   },
   "keywords": [
     "canvas",

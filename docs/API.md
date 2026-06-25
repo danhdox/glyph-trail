@@ -2,7 +2,7 @@
 
 ## `createGlyphTrail(canvas, options)`
 
-Creates a Canvas 2D pixel-particle renderer bound to an existing canvas.
+Creates an interactive glyph renderer bound to an existing canvas. WebGL2 is used by default for shader displacement, halftone, rays, and bloom; Canvas 2D is used automatically as a fallback when WebGL2 is unavailable.
 
 ```ts
 import { createGlyphTrail } from "@glyph-trail/core";
@@ -81,8 +81,8 @@ interface GlyphTrailSettings {
     spread: number;
   };
   glitch: {
-    intensity: number; // 0-100 how far pixels drag in the cursor's direction as it sweeps
-    speed: number; // 0-100 motion sensitivity (how easily cursor movement charges the drag)
+    intensity: number; // 0-100 WebGL UV displacement strength / Canvas particle drag strength
+    speed: number; // 0-100 motion sensitivity (how easily cursor movement charges the effect)
   };
 }
 ```
